@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Credenciales y secretos
+.env
+.env.local
+secrets/
+*.key
+*.pem
+
+# Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Datos y logs
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# Sistema operativo
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Modelos y descargas grandes
+models/
+*.gguf
+*.bin
+*.pt
+*.pth
+
+# Notas personales
+notas_personales/
+scratch/
