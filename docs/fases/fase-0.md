@@ -123,7 +123,7 @@ directo de la Fase 1.
 - Credenciales en `.env`, excluido de Git. Plantilla en `.env.example`.
 - Dependencias congeladas en `requirements.txt`.
 
-Particularidades del entorno Windows/Git Bash: ver `docs/entorno-desarrollo.md`.
+Particularidades del entorno Windows/Git Bash: ver `docs/desarrollo/entorno-desarrollo.md`.
 
 ---
 

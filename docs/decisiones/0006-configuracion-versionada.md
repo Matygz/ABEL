@@ -17,7 +17,7 @@ La vista `current_settings` expone solo los valores vigentes.
 Una tabla de configuración normal guarda el valor actual y destruye el
 anterior. Eso alcanza para un sistema estático.
 
-ABEL está previsto para ajustar sus propios parámetros (ver `docs/vision.md`,
+ABEL está previsto para ajustar sus propios parámetros (ver `docs/filosofia/vision.md`,
 principio 8). Si cada cambio destruye el estado previo, se pierde:
 
 - Cuál era el valor antes.

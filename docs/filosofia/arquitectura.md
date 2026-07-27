@@ -106,7 +106,7 @@ Cómo ABEL sabe lo que sabe. Cómo decide investigar. Cómo se ajusta a sí mism
 
 ### Capa 5: Propósito y valores
 
-Lo que orienta las decisiones cuando ABEL tiene autonomía. Ver docs/vision.md para el propósito actual.
+Lo que orienta las decisiones cuando ABEL tiene autonomía. Ver `docs/filosofia/vision.md` para el propósito actual.
 
 ## Decisiones tecnológicas base
 

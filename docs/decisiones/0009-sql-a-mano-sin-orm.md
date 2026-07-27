@@ -30,7 +30,7 @@ Razones para no usarlo en este proyecto:
 
 Un ORM **no** ayuda a *visualizar* la base. Cambia cómo se escriben las
 consultas, no cómo se inspeccionan los datos. Para eso se usan herramientas
-gráficas, decisión independiente (ver `docs/entorno-desarrollo.md`).
+gráficas, decisión independiente (ver `docs/desarrollo/entorno-desarrollo.md`).
 
 ## Consecuencias
 
