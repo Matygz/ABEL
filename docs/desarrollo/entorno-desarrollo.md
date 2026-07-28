@@ -91,7 +91,16 @@ winpty psql -U postgres -d abel -f db/schema/00N_archivo.sql
 ---
 
 ## Problemas conocidos (sin solución aplicada)
+### Salida de Python sin buffer
 
+En Git Bash, Python no detecta la salida como terminal y usa buffer por
+bloques: los logs aparecen a tandas en vez de en tiempo real. Se resuelve con
+`python -u -m nucleo`.
+
+### asyncio en Windows
+
+psycopg3 en modo asíncrono no funciona con el bucle por defecto. Ver
+`docs/decisiones/0008-psycopg3-como-driver.md`.
 ### Codificación de la consola
 
 `psql` advierte que el código de página de la consola (850) difiere del de

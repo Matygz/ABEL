@@ -32,3 +32,6 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0008 | psycopg3 como driver de PostgreSQL | Vigente | 0.3 |
 | 0009 | SQL a mano, sin ORM | Vigente | 0.3 |
 | 0010 | Convenciones de nomenclatura | Vigente | 0.3 |
+| 0011 | Usuario de aplicación con privilegios mínimos | Vigente | 1 |
+| 0012 | Errores operativos vs. inesperados | Vigente | 1 |
+| 0013 | Timeouts por tarea en el planificador | Vigente | 1 |

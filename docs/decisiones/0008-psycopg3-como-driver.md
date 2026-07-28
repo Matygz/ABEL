@@ -55,3 +55,15 @@ como entero de Python y `'INFO'` como texto, sin conversión manual.
   bien aislada: cambiar de driver sería reescribir un módulo, no el proyecto.
 - Nota de nomenclatura: el paquete se llama `psycopg` a secas, no `psycopg3`.
   El `3` es solo la versión mayor.
+  - **Incompatible con `ProactorEventLoop`**, el bucle por defecto de asyncio en
+  Windows desde Python 3.8. Hay que arrancar con
+  `asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)`, una sola vez
+  en `nucleo/__main__.py`.
+
+  `SelectorEventLoop` en Windows no soporta subprocesos —relevante si en la
+  Fase 5 se quiere lanzar un LLM local como proceso hijo— y tiene un tope de
+  512 sockets simultáneos, holgado para el uso previsto.
+
+  **asyncpg no tiene este problema.** Es un punto a su favor que no se
+  anticipó al tomar la decisión. No la revierte: el arreglo es una línea y las
+  tres razones originales siguen valiendo.
