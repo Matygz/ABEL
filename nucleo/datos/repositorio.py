@@ -26,14 +26,13 @@ from psycopg.types.json import Jsonb
 
 
 from nucleo.config import ConfigEntorno
+from nucleo.errores import ErrorOperativo
 
 logger = logging.getLogger(__name__)
 
-
-class ErrorRepositorio(Exception):
+class ErrorRepositorio(ErrorOperativo):
     """Fallo al acceder a la base de datos."""
-
-
+    
 class Repositorio:
     """Acceso asíncrono a la base de datos de ABEL."""
 
@@ -53,7 +52,7 @@ class Repositorio:
             ) as conn:
                 yield conn
         except psycopg.Error as exc:
-            logger.error("Fallo de base de datos: %s", exc)
+            logger.debug("Fallo de base de datos: %s", exc)
             raise ErrorRepositorio(str(exc)) from exc
 
     # ------------------------------------------------------------------

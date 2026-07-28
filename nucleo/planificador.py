@@ -15,6 +15,8 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
+from nucleo.errores import ErrorOperativo
+
 logger = logging.getLogger(__name__)
 
 FuncionTarea = Callable[[], Awaitable[None]]
@@ -93,9 +95,16 @@ class Planificador:
             while True:
                 try:
                     await tarea.funcion()
+                except ErrorOperativo as exc:
+                    logger.error(
+                        "Tarea %s: %s. Reintenta en %ss.",
+                        tarea.nombre,
+                        str(exc).splitlines()[0],
+                        tarea.intervalo_segundos,
+                    )
                 except Exception:
                     logger.exception(
-                        "Fallo en la tarea %s. Reintenta en %ss.",
+                        "Fallo inesperado en la tarea %s. Reintenta en %ss.",
                         tarea.nombre,
                         tarea.intervalo_segundos,
                     )
