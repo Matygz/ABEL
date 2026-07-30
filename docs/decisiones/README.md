@@ -35,3 +35,10 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0011 | Usuario de aplicación con privilegios mínimos | Vigente | 1 |
 | 0012 | Errores operativos vs. inesperados | Vigente | 1 |
 | 0013 | Timeouts por tarea en el planificador | Vigente | 1 |
+| 0014 | Niveles de confianza y asimetría conceder/revocar | Vigente | 2.1 |
+| 0015 | Cuatro identificadores separados para un usuario | Vigente | 2.1 |
+| 0016 | Diseño del protocolo de Nodos | Vigente | 2.2 |
+| 0017 | Semántica del ack e idempotencia | Vigente | 2.2 |
+| 0018 | Superficie mínima de error por el cable | Vigente | 2.2 |
+| 0019 | El Nodo se programa como remoto | Vigente | 2.2 |
+| 0020 | Servicios en el planificador | Vigente | 2.2 |

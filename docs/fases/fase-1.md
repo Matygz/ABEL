@@ -126,7 +126,7 @@ exacta, hay que calcular el próximo instante en lugar de dormir un fijo.
 
 **Apagado lento con la base caída.** Ctrl+C tarda lo que tarde el timeout de
 conexión, porque el cierre de la ejecución también intenta escribir. No es un
-error, pero es incómodo.
+error, pero es incómodo. Corregido en fase 2.
 
 **Apagado degradado.** Verificado accidentalmente: al cortar con la base caída,
 `__aexit__` no pudo escribir el cierre, lo registró en el log y terminó igual
@@ -147,7 +147,7 @@ Probablemente se resuelva como otra tarea periódica del planificador.
 
 **Ctrl+C puede tardar hasta un intervalo.** En Windows, el manejador de señales
 se ejecuta cuando el intérprete recupera el control. Como las tareas duermen
-entre ciclos, la detención puede demorar. Con 60 segundos es incómodo.
+entre ciclos, la detención puede demorar. Con 60 segundos es incómodo. - Corregido en fase 2.
 
 **El uptime es redundante.** Se puede calcular como
 `occurred_at - runs.started_at`. Se guarda por comodidad y porque cuesta nada,
