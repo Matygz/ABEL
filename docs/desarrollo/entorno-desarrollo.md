@@ -91,6 +91,7 @@ winpty psql -U postgres -d abel -f db/schema/00N_archivo.sql
 ---
 
 ## Problemas conocidos (sin solución aplicada)
+
 ### Salida de Python sin buffer
 
 En Git Bash, Python no detecta la salida como terminal y usa buffer por

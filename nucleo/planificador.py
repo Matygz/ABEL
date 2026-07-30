@@ -29,6 +29,7 @@ class Tarea:
     nombre: str
     funcion: FuncionTarea
     intervalo_segundos: float
+    timeout_segundos: float | None = None
 
     def __post_init__(self) -> None:
         if self.intervalo_segundos <= 0:
@@ -36,6 +37,18 @@ class Tarea:
                 f"El intervalo de {self.nombre} debe ser mayor a cero, "
                 f"se recibió {self.intervalo_segundos}."
             )
+        if self.timeout_segundos is not None and self.timeout_segundos <= 0:
+            raise ValueError(
+                f"El timeout de {self.nombre} debe ser mayor a cero, "
+                f"se recibió {self.timeout_segundos}."
+            )
+
+    @property
+    def timeout_efectivo(self) -> float:
+        """Timeout a aplicar. Por defecto, la mitad del intervalo."""
+        if self.timeout_segundos is not None:
+            return self.timeout_segundos
+        return max(self.intervalo_segundos / 2, 1.0)
 
 
 class Planificador:
@@ -54,9 +67,10 @@ class Planificador:
             )
         self._tareas.append(tarea)
         logger.info(
-            "Tarea registrada: %s (cada %ss)",
+            "Tarea registrada: %s (cada %ss, timeout %ss)",
             tarea.nombre,
             tarea.intervalo_segundos,
+            tarea.timeout_efectivo,
         )
 
     async def iniciar(self) -> None:
@@ -94,7 +108,17 @@ class Planificador:
         try:
             while True:
                 try:
-                    await tarea.funcion()
+                    await asyncio.wait_for(
+                        tarea.funcion(), timeout=tarea.timeout_efectivo
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(
+                        "Tarea %s superó su límite de %ss y fue cancelada. "
+                        "Reintenta en %ss.",
+                        tarea.nombre,
+                        tarea.timeout_efectivo,
+                        tarea.intervalo_segundos,
+                    )
                 except ErrorOperativo as exc:
                     logger.error(
                         "Tarea %s: %s. Reintenta en %ss.",
