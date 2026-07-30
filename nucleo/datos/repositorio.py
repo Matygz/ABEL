@@ -28,6 +28,10 @@ from psycopg.types.json import Jsonb
 from nucleo.config import ConfigEntorno
 from nucleo.errores import ErrorOperativo
 
+from typing import Any, AsyncIterator, Sequence
+
+from protocolos.contenidos import Observacion
+
 logger = logging.getLogger(__name__)
 
 class ErrorRepositorio(ErrorOperativo):
@@ -319,3 +323,94 @@ class Repositorio:
                 )
 
         logger.info("Dispositivo revocado: %s (%s)", device_id, motivo)
+
+        # ------------------------------------------------------------------
+    # Observaciones de Nodos
+    # ------------------------------------------------------------------
+
+    async def obtener_dispositivo_activo(self, device_id: UUID) -> dict[str, Any] | None:
+        """Devuelve un dispositivo solo si está autorizado y no revocado.
+
+        Es la consulta que decide si un Nodo puede conectarse. Un dispositivo
+        revocado o desactivado devuelve None: la revocación es permanente
+        hasta que un admin la levante (ver decisión 0011).
+        """
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT d.id, d.platform, d.trust_level, a.name
+                  FROM devices d
+                  JOIN actors a ON a.id = d.id
+                 WHERE d.id = %s
+                   AND d.revoked_at IS NULL
+                   AND a.active = true
+                """,
+                (device_id,),
+            )
+            return await cur.fetchone()
+
+    async def obtener_tipos_de_evento(self) -> set[str]:
+        """Devuelve los tipos de evento válidos del catálogo."""
+        async with self._conexion() as conn:
+            cur = await conn.execute("SELECT name FROM event_types")
+            return {fila["name"] for fila in await cur.fetchall()}
+
+    async def persistir_observaciones(
+        self,
+        device_id: UUID,
+        observaciones: Sequence[Observacion],
+        run_id: UUID | None = None,
+    ) -> tuple[list[UUID], list[tuple[UUID, str]]]:
+        """Persiste un lote de observaciones. Devuelve (confirmadas, rechazadas).
+
+        Idempotente: el id de cada observación lo genera el Nodo y se usa como
+        events.id. Un reenvío por ack perdido no duplica nada — el INSERT
+        choca con la clave primaria y se ignora (ver decisión 0002).
+
+        El lote entero va en una transacción: o se escribe todo lo válido, o
+        no se escribe nada. Solo entonces se confirma.
+        """
+        if not observaciones:
+            return [], []
+
+        tipos_validos = await self.obtener_tipos_de_evento()
+
+        aceptadas: list[Observacion] = []
+        rechazadas: list[tuple[UUID, str]] = []
+        for obs in observaciones:
+            if obs.event_type not in tipos_validos:
+                rechazadas.append((obs.id, "unknown_event_type"))
+            else:
+                aceptadas.append(obs)
+
+        if aceptadas:
+            filas = [
+                (
+                    obs.id,
+                    obs.occurred_at,
+                    obs.event_type,
+                    device_id,
+                    run_id,
+                    Jsonb(obs.data),
+                )
+                for obs in aceptadas
+            ]
+            async with self._conexion() as conn:
+                async with conn.transaction():
+                    await conn.cursor().executemany(
+                        """
+                        INSERT INTO events
+                            (id, occurred_at, event_type, actor_id, run_id, payload)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (id) DO NOTHING
+                        """,
+                        filas,
+                    )
+
+        if rechazadas:
+            logger.warning(
+                "Dispositivo %s: %d observación(es) rechazada(s) por tipo desconocido.",
+                device_id, len(rechazadas),
+            )
+
+        return [obs.id for obs in aceptadas], rechazadas

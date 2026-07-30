@@ -12,6 +12,7 @@ from nucleo.datos.repositorio import Repositorio
 from nucleo.logging_setup import ajustar_nivel, configurar_logging
 from nucleo.planificador import Planificador, Tarea
 from nucleo.tareas.presencia import crear_tarea_presencia
+from nucleo.red.servidor import ServidorNodos
 
 logger = logging.getLogger(__name__)
 
@@ -44,10 +45,17 @@ async def main() -> None:
                 intervalo_segundos=intervalo,
             )
         )
+        servidor = ServidorNodos(
+            repositorio=repositorio,
+            version=VERSION,
+            host=config.ws_host,
+            puerto=config.ws_puerto,
+            intervalo_presencia=int(intervalo),
+        )
+        planificador.registrar_servicio("servidor_nodos", servidor.ejecutar)
 
         _instalar_senales(planificador, ciclo)
         await planificador.iniciar()
-
 
 def _instalar_senales(planificador: Planificador, ciclo: CicloVida) -> None:
     """Hace que Ctrl+C solicite una detención ordenada."""

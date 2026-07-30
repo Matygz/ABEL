@@ -47,6 +47,7 @@ def configurar_logging(nivel: str = "INFO") -> None:
     raiz.setLevel(_nivel_valido(nivel))
     raiz.addHandler(consola)
     raiz.addHandler(archivo)
+    logging.getLogger("websockets").setLevel(logging.INFO)
 
 
 def ajustar_nivel(nivel: str) -> None:

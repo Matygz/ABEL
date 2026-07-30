@@ -26,6 +26,8 @@ class ConfigEntorno:
     db_usuario: str
     db_password: str
     db_connect_timeout: int = 5
+    ws_host: str = "127.0.0.1"
+    ws_puerto: int = 8765
 
     @property
     def conninfo(self) -> str:
@@ -78,4 +80,6 @@ def cargar_config() -> ConfigEntorno:
         db_nombre=_requerida("ABEL_DB_NAME"),
         db_usuario=_requerida("ABEL_DB_USER"),
         db_password=_requerida("ABEL_DB_PASSWORD"),
+        ws_host=os.getenv("ABEL_WS_HOST", "127.0.0.1"),
+        ws_puerto=int(os.getenv("ABEL_WS_PORT", "8765")),
     )

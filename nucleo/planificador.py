@@ -58,7 +58,22 @@ class Planificador:
         self._tareas: list[Tarea] = []
         self._corriendo: list[asyncio.Task] = []
         self._detener = asyncio.Event()
+        self._tareas: list[Tarea] = []
+        self._servicios: list[tuple[str, FuncionTarea]] = []
 
+    def registrar_servicio(self, nombre: str, funcion: FuncionTarea) -> None:
+        """Registra un proceso de larga duración.
+
+        A diferencia de una tarea, un servicio arranca una vez y corre hasta
+        que se lo detiene. Si termina o falla, se reinicia.
+        """
+        if self._corriendo:
+            raise RuntimeError(
+                "No se pueden registrar servicios con el planificador en marcha."
+            )
+        self._servicios.append((nombre, funcion))
+        logger.info("Servicio registrado: %s", nombre)
+        
     def registrar(self, tarea: Tarea) -> None:
         """Agrega una tarea. Debe llamarse antes de iniciar()."""
         if self._corriendo:
@@ -74,17 +89,26 @@ class Planificador:
         )
 
     async def iniciar(self) -> None:
-        """Arranca todas las tareas y espera hasta que se pida detener."""
-        if not self._tareas:
-            logger.warning("El planificador arrancó sin tareas registradas.")
+        """Arranca todas las tareas y servicios, y espera hasta que se pida detener."""
+        if not self._tareas and not self._servicios:
+            logger.warning("El planificador arrancó sin tareas ni servicios registrados.")
 
         self._detener.clear()
         self._corriendo = [
             asyncio.create_task(self._ejecutar_periodica(t), name=t.nombre)
             for t in self._tareas
+        ] + [
+            asyncio.create_task(self._ejecutar_servicio(n, f), name=n)
+            for n, f in self._servicios
+        ] + [
+            asyncio.create_task(self._despertar_periodicamente(), name="_despertador")
         ]
 
-        logger.info("Planificador en marcha con %d tarea(s).", len(self._corriendo))
+        logger.info(
+            "Planificador en marcha: %d tarea(s), %d servicio(s).",
+            len(self._tareas),
+            len(self._servicios),
+        )
         await self._detener.wait()
         await self._cancelar_tareas()
 
@@ -135,4 +159,49 @@ class Planificador:
                 await asyncio.sleep(tarea.intervalo_segundos)
         except asyncio.CancelledError:
             logger.debug("Tarea %s cancelada.", tarea.nombre)
+            raise
+
+    async def _ejecutar_servicio(self, nombre: str, funcion: FuncionTarea) -> None:
+        """Mantiene vivo un servicio, reiniciándolo si termina o falla.
+
+        A diferencia de una tarea periódica, un servicio no lleva timeout: se
+        espera que esté bloqueado esperando trabajo. Esa es su función.
+        """
+        espera_reinicio = 5.0
+        try:
+            while True:
+                try:
+                    await funcion()
+                    logger.warning("El servicio %s terminó solo. Reiniciando.", nombre)
+                except ErrorOperativo as exc:
+                    logger.error(
+                        "Servicio %s: %s. Reinicia en %ss.",
+                        nombre,
+                        str(exc).splitlines()[0],
+                        espera_reinicio,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Fallo inesperado en el servicio %s. Reinicia en %ss.",
+                        nombre,
+                        espera_reinicio,
+                    )
+                await asyncio.sleep(espera_reinicio)
+        except asyncio.CancelledError:
+            logger.debug("Servicio %s cancelado.", nombre)
+            raise
+
+    async def _despertar_periodicamente(self) -> None:
+        """Despierta el bucle con frecuencia para que Ctrl+C se atienda rápido.
+
+        En Windows los manejadores de señal solo corren cuando el intérprete
+        recupera el control. Sin este ciclo corto, una detención puede tardar
+        hasta lo que dure el sleep más largo en curso.
+
+        El costo es un temporizador; el bucle sigue ocioso entre despertares.
+        """
+        try:
+            while True:
+                await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
             raise
