@@ -156,3 +156,166 @@ class Repositorio:
             fila = await cur.fetchone()
 
         return fila["id"]
+    # ------------------------------------------------------------------
+    # Usuarios
+    # ------------------------------------------------------------------
+
+    async def obtener_usuario_por_username(self, username: str) -> dict[str, Any]:
+        """Devuelve un usuario por su username. Falla si no existe."""
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT u.id, u.username, u.full_name, u.role, a.name AS display_name
+                  FROM users u
+                  JOIN actors a ON a.id = u.id
+                 WHERE u.username = %s
+                """,
+                (username,),
+            )
+            fila = await cur.fetchone()
+
+        if fila is None:
+            raise ErrorRepositorio(f"No existe el usuario {username!r}.")
+        return fila
+
+    # ------------------------------------------------------------------
+    # Dispositivos
+    # ------------------------------------------------------------------
+
+    async def obtener_dispositivo(self, device_id: UUID) -> dict[str, Any] | None:
+        """Devuelve un dispositivo por su id, o None si no existe."""
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT d.*, a.name, a.active
+                  FROM devices d
+                  JOIN actors a ON a.id = d.id
+                 WHERE d.id = %s
+                """,
+                (device_id,),
+            )
+            return await cur.fetchone()
+
+    async def listar_dispositivos(self, incluir_revocados: bool = False) -> list[dict[str, Any]]:
+        """Lista los dispositivos registrados."""
+        condicion = "" if incluir_revocados else "WHERE d.revoked_at IS NULL"
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                f"""
+                SELECT a.name, d.id, d.platform, d.trust_level,
+                       d.authorized_at, d.revoked_at
+                  FROM devices d
+                  JOIN actors a ON a.id = d.id
+                  {condicion}
+                 ORDER BY d.authorized_at
+                """
+            )
+            return await cur.fetchall()
+
+    async def autorizar_dispositivo(
+        self,
+        nombre: str,
+        platform: str,
+        autorizado_por: UUID,
+        trust_level: str = "restricted",
+        politica: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> UUID:
+        """Registra un dispositivo nuevo. Devuelve su id.
+
+        Inserta en `actors` y en `devices` dentro de una misma transacción:
+        una fila en `devices` sin su fila en `actors` sería inconsistente.
+        """
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    INSERT INTO actors (actor_type, name)
+                    VALUES ('device', %s)
+                    RETURNING id
+                    """,
+                    (nombre,),
+                )
+                device_id = (await cur.fetchone())["id"]
+
+                await conn.execute(
+                    """
+                    INSERT INTO devices
+                        (id, platform, trust_level, authorized_by,
+                         authorization_policy, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        device_id,
+                        platform,
+                        trust_level,
+                        autorizado_por,
+                        politica,
+                        Jsonb(metadata or {}),
+                    ),
+                )
+
+                await conn.execute(
+                    """
+                    INSERT INTO events
+                        (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'device_authorized', %s, %s)
+                    """,
+                    (
+                        autorizado_por,
+                        Jsonb({
+                            "device_id": str(device_id),
+                            "device_name": nombre,
+                            "platform": platform,
+                            "trust_level": trust_level,
+                            "policy": politica,
+                        }),
+                    ),
+                )
+
+        logger.info(
+            "Dispositivo autorizado: %s (%s, %s) por %s",
+            nombre, device_id, trust_level, autorizado_por,
+        )
+        return device_id
+
+    async def revocar_dispositivo(
+        self, device_id: UUID, revocado_por: UUID, motivo: str
+    ) -> None:
+        """Revoca un dispositivo. No se borra: sus eventos históricos persisten."""
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    UPDATE devices
+                       SET revoked_at = now(),
+                           revoked_by = %s,
+                           revocation_reason = %s
+                     WHERE id = %s AND revoked_at IS NULL
+                    RETURNING id
+                    """,
+                    (revocado_por, motivo, device_id),
+                )
+                if await cur.fetchone() is None:
+                    raise ErrorRepositorio(
+                        f"El dispositivo {device_id} no existe o ya estaba revocado."
+                    )
+
+                await conn.execute(
+                    "UPDATE actors SET active = false WHERE id = %s",
+                    (device_id,),
+                )
+
+                await conn.execute(
+                    """
+                    INSERT INTO events
+                        (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'device_revoked', %s, %s)
+                    """,
+                    (
+                        revocado_por,
+                        Jsonb({"device_id": str(device_id), "reason": motivo}),
+                    ),
+                )
+
+        logger.info("Dispositivo revocado: %s (%s)", device_id, motivo)
