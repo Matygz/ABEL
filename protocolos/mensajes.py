@@ -54,6 +54,7 @@ class TipoMensaje:
     """
 
     HELLO = "hello"
+    CHALLENGE = "challenge"
     WELCOME = "welcome"
     REJECT = "reject"
     PRESENCE_MARK = "presence_mark"
@@ -62,7 +63,8 @@ class TipoMensaje:
     ERROR = "error"
 
     TODOS = frozenset({
-        HELLO, WELCOME, REJECT, PRESENCE_MARK, OBSERVATION, ACK, ERROR,
+        HELLO, CHALLENGE, WELCOME, REJECT,
+        PRESENCE_MARK, OBSERVATION, ACK, ERROR,
     })
 
 

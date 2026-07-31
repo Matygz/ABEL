@@ -122,6 +122,20 @@ def leer_hello(sobre: Sobre) -> Hello:
         credential=_texto(p, "credential", requerido=False),
     )
 
+# ----------------------------------------------------------------------
+# challenge
+# ----------------------------------------------------------------------
+
+def crear_challenge(desafio_texto: str) -> Sobre:
+    """Desafío de un solo uso que el Nodo debe firmar."""
+    return Sobre(
+        tipo=TipoMensaje.CHALLENGE,
+        payload={"challenge": desafio_texto},
+    )
+
+
+def leer_challenge(sobre: Sobre) -> str:
+    return _texto(sobre.payload, "challenge")
 
 # ----------------------------------------------------------------------
 # welcome

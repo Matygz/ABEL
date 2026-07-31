@@ -21,12 +21,14 @@ from nucleo.datos.repositorio import ErrorRepositorio, Repositorio
 from protocolos.contenidos import (
     MAX_OBSERVACIONES_POR_LOTE,
     crear_ack,
+    crear_challenge,
     crear_error,
     crear_reject,
     crear_welcome,
     leer_hello,
     leer_observation,
 )
+from protocolos.firma import a_texto, generar_desafio, material_a_firmar, verificar, desde_texto, ErrorFirma
 from protocolos.mensajes import (
     CodigoError,
     ErrorProtocolo,
@@ -115,36 +117,35 @@ class ServidorNodos:
             logger.info("Nodo desconectado: %s (%s)", nombre, motivo)
 
     async def _saludar(self, conexion: ServerConnection) -> dict | None:
-        """Procesa el hello. Devuelve el dispositivo, o None si se rechazó.
+        """Procesa el saludo en tres pasos. Devuelve el dispositivo, o None.
 
-        Antes de un hello válido, un error cierra la conexión sin explicar:
-        a un desconocido no se le da diagnóstico (ver decisión sobre códigos
-        de error). Después del hello, se responde con un código.
+        1. El Nodo declara su device_id.
+        2. El Núcleo emite un desafío aleatorio de un solo uso.
+        3. El Nodo devuelve la firma del desafío con su clave privada.
+
+        El desafío evita ataques de repetición: una firma capturada no sirve
+        para una conexión posterior, porque el desafío nunca se repite.
+
+        Antes de completar la autenticación, un error cierra la conexión sin
+        explicar (ver decisión 0018).
         """
-        try:
-            crudo = await conexion.recv()
-            sobre = deserializar(crudo)
-
-            if sobre.tipo != TipoMensaje.HELLO:
-                logger.warning("Primer mensaje no fue hello: %s", sobre.tipo)
-                await conexion.close(code=1002)
-                return None
-
-            hello = leer_hello(sobre)
-
-        except ErrorProtocolo as exc:
-            logger.warning("Saludo inválido: %s", exc.detalle)
-            await conexion.close(code=1002)
-            return None
-        except (websockets.ConnectionClosed, TimeoutError):
+        hello = await self._recibir_hello(conexion)
+        if hello is None:
             return None
 
         dispositivo = await self._repo.obtener_dispositivo_activo(hello.device_id)
+        claves = await self._repo.obtener_claves_activas(hello.device_id)
 
-        if dispositivo is None:
-            logger.warning(
-                "Rechazado: dispositivo %s no autorizado o revocado.", hello.device_id
-            )
+        desafio = generar_desafio()
+        await self._enviar(conexion, crear_challenge(a_texto(desafio)))
+
+        respuesta = await self._recibir_hello(conexion)
+        if respuesta is None:
+            return None
+
+        if not await self._credencial_valida(
+            respuesta, dispositivo, claves, desafio, hello.device_id
+        ):
             await self._enviar(conexion, crear_reject(CodigoError.UNAUTHORIZED))
             await conexion.close(code=1008)
             return None
@@ -159,6 +160,70 @@ class ServidorNodos:
             ),
         )
         return dispositivo
+
+    async def _recibir_hello(self, conexion: ServerConnection):
+        """Recibe y valida un mensaje hello. Cierra la conexión si es inválido."""
+        try:
+            sobre = deserializar(await conexion.recv())
+            if sobre.tipo != TipoMensaje.HELLO:
+                logger.warning("Se esperaba hello, llegó %s.", sobre.tipo)
+                await conexion.close(code=1002)
+                return None
+            return leer_hello(sobre)
+        except ErrorProtocolo as exc:
+            logger.warning("Saludo inválido: %s", exc.detalle)
+            await conexion.close(code=1002)
+            return None
+        except (websockets.ConnectionClosed, TimeoutError):
+            return None
+
+    async def _credencial_valida(
+        self, respuesta, dispositivo, claves, desafio, device_id
+    ) -> bool:
+        """Verifica la firma. Registra el fallo, pero no revela el motivo.
+
+        El trabajo se hace igual aunque el dispositivo no exista: así el
+        tiempo de respuesta no delata si un device_id está registrado.
+        """
+        material = material_a_firmar(desafio, device_id)
+
+        firma_valida = False
+        if respuesta.credential is not None:
+            try:
+                firma = desde_texto(respuesta.credential)
+                firma_valida = any(verificar(k, material, firma) for k in claves)
+            except ErrorFirma:
+                firma_valida = False
+
+        if respuesta.device_id != device_id:
+            logger.warning("El device_id cambió entre los dos hello.")
+            firma_valida = False
+
+        if dispositivo is None:
+            logger.warning("Dispositivo %s no autorizado o revocado.", device_id)
+            return False
+
+        if not claves:
+            logger.warning("Dispositivo %s no tiene claves registradas.", device_id)
+            await self._registrar_fallo_auth(device_id, "no_keys")
+            return False
+
+        if not firma_valida:
+            logger.warning("Firma inválida de %s.", device_id)
+            await self._registrar_fallo_auth(device_id, "invalid_signature")
+            return False
+
+        return True
+
+    async def _registrar_fallo_auth(self, device_id: UUID, motivo: str) -> None:
+        try:
+            await self._repo.registrar_evento(
+                event_type="auth_failed",
+                actor_id=device_id,
+                payload={"reason": motivo},
+            )
+        except ErrorRepositorio as exc:
+            logger.error("No se pudo registrar auth_failed: %s", exc)
 
     async def _procesar(
         self, conexion: ServerConnection, device_id: UUID, crudo: str | bytes

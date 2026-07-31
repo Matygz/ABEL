@@ -10,6 +10,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
+from protocolos.firma import LARGO_CLAVE, ErrorFirma, desde_texto
 
 ARCHIVO_POR_DEFECTO = Path("nodo.config.json")
 
@@ -24,6 +25,7 @@ class ConfigNodo:
     nombre: str
     servidor_url: str
     capabilities: tuple[str, ...]
+    clave_privada: bytes
 
 
 def cargar_config(ruta: Path = ARCHIVO_POR_DEFECTO) -> ConfigNodo:
@@ -47,9 +49,32 @@ def cargar_config(ruta: Path = ARCHIVO_POR_DEFECTO) -> ConfigNodo:
     except (ValueError, TypeError):
         raise ErrorConfigNodo(f"device_id inválido: {datos['device_id']!r}.") from None
 
+    ruta_clave = datos.get("clave_privada")
+    if not ruta_clave:
+        raise ErrorConfigNodo(
+            f"Falta 'clave_privada' en {ruta}. Generala con: "
+            f"python -m scripts.dispositivos generar-clave"
+        )
+
+    archivo_clave = Path(ruta_clave)
+    if not archivo_clave.exists():
+        raise ErrorConfigNodo(f"No existe el archivo de clave: {archivo_clave}")
+
+    try:
+        clave = desde_texto(archivo_clave.read_text(encoding="ascii").strip())
+    except (ErrorFirma, UnicodeDecodeError) as exc:
+        raise ErrorConfigNodo(f"La clave en {archivo_clave} es inválida: {exc}") from None
+
+    if len(clave) != LARGO_CLAVE:
+        raise ErrorConfigNodo(
+            f"La clave en {archivo_clave} tiene {len(clave)} bytes, "
+            f"se esperaban {LARGO_CLAVE}."
+        )
+
     return ConfigNodo(
         device_id=device_id,
         nombre=datos["nombre"],
         servidor_url=datos["servidor_url"],
         capabilities=tuple(datos.get("capabilities", ["presence"])),
+        clave_privada=clave,
     )

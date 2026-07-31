@@ -25,8 +25,10 @@ from protocolos.contenidos import (
     crear_hello,
     crear_observation,
     leer_ack,
+    leer_challenge,
     leer_welcome,
 )
+from protocolos.firma import a_texto, desde_texto, firmar, material_a_firmar
 from protocolos.mensajes import ErrorProtocolo, TipoMensaje, deserializar
 
 logger = logging.getLogger(__name__)
@@ -93,6 +95,7 @@ class ClienteNodo:
             restante -= 0.2
 
     async def _saludar(self, ws) -> None:
+        """Saludo en tres pasos: declarar, recibir desafío, firmar."""
         await ws.send(
             crear_hello(
                 device_id=self._config.device_id,
@@ -104,15 +107,39 @@ class ClienteNodo:
         sobre = deserializar(await ws.recv())
 
         if sobre.tipo == TipoMensaje.REJECT:
-            codigo = sobre.payload.get("code", "unknown")
-            raise ErrorProtocolo(f"El Núcleo rechazó la conexión: {codigo}")
+            raise ErrorProtocolo(
+                f"El Núcleo rechazó la conexión: {sobre.payload.get('code', 'unknown')}"
+            )
+
+        if sobre.tipo != TipoMensaje.CHALLENGE:
+            raise ErrorProtocolo(f"Se esperaba challenge, llegó {sobre.tipo}.")
+
+        desafio = desde_texto(leer_challenge(sobre))
+        material = material_a_firmar(desafio, self._config.device_id)
+        firma = firmar(self._config.clave_privada, material)
+
+        await ws.send(
+            crear_hello(
+                device_id=self._config.device_id,
+                capabilities=list(self._config.capabilities),
+                client_version=VERSION_CLIENTE,
+                credential=a_texto(firma),
+            ).serializar()
+        )
+
+        sobre = deserializar(await ws.recv())
+
+        if sobre.tipo == TipoMensaje.REJECT:
+            raise ErrorProtocolo(
+                f"El Núcleo rechazó la credencial: {sobre.payload.get('code', 'unknown')}"
+            )
 
         if sobre.tipo != TipoMensaje.WELCOME:
             raise ErrorProtocolo(f"Se esperaba welcome, llegó {sobre.tipo}.")
 
         self._sesion = leer_welcome(sobre)
         logger.info(
-            "Conectado al Núcleo %s. Presencia cada %ss, lotes de hasta %d.",
+            "Autenticado ante el Núcleo %s. Presencia cada %ss, lotes de hasta %d.",
             self._sesion.server_version,
             self._sesion.presence_interval_seconds,
             self._sesion.max_batch_size,
