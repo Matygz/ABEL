@@ -61,3 +61,5 @@ models/
 notas_personales/
 scratch/
 nodo.config.json
+claves/
+*.key

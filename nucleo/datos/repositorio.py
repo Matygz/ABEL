@@ -414,3 +414,117 @@ class Repositorio:
             )
 
         return [obs.id for obs in aceptadas], rechazadas
+
+# ------------------------------------------------------------------
+    # Claves de dispositivos
+    # ------------------------------------------------------------------
+
+    async def registrar_clave(
+        self,
+        device_id: UUID,
+        clave_publica: bytes,
+        creada_por: UUID,
+        etiqueta: str | None = None,
+    ) -> UUID:
+        """Registra una clave pública para un dispositivo."""
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    INSERT INTO device_keys
+                        (device_id, public_key, created_by, label)
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (device_id, clave_publica, creada_por, etiqueta),
+                )
+                key_id = (await cur.fetchone())["id"]
+
+                await conn.execute(
+                    """
+                    INSERT INTO events (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'device_key_registered', %s, %s)
+                    """,
+                    (
+                        creada_por,
+                        Jsonb({
+                            "device_id": str(device_id),
+                            "key_id": str(key_id),
+                            "label": etiqueta,
+                        }),
+                    ),
+                )
+
+        logger.info("Clave registrada para %s: %s", device_id, key_id)
+        return key_id
+
+    async def obtener_claves_activas(self, device_id: UUID) -> list[bytes]:
+        """Devuelve las claves públicas vigentes de un dispositivo.
+
+        Un dispositivo puede tener más de una durante una rotación.
+        """
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT public_key FROM device_keys
+                 WHERE device_id = %s AND revoked_at IS NULL
+                 ORDER BY created_at DESC
+                """,
+                (device_id,),
+            )
+            return [bytes(fila["public_key"]) for fila in await cur.fetchall()]
+
+    async def revocar_clave(
+        self, key_id: UUID, revocada_por: UUID, motivo: str
+    ) -> None:
+        """Revoca una clave. El dispositivo conserva su identidad."""
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    UPDATE device_keys
+                       SET revoked_at = now(),
+                           revoked_by = %s,
+                           revocation_reason = %s
+                     WHERE id = %s AND revoked_at IS NULL
+                    RETURNING device_id
+                    """,
+                    (revocada_por, motivo, key_id),
+                )
+                fila = await cur.fetchone()
+                if fila is None:
+                    raise ErrorRepositorio(
+                        f"La clave {key_id} no existe o ya estaba revocada."
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO events (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'device_key_revoked', %s, %s)
+                    """,
+                    (
+                        revocada_por,
+                        Jsonb({
+                            "device_id": str(fila["device_id"]),
+                            "key_id": str(key_id),
+                            "reason": motivo,
+                        }),
+                    ),
+                )
+
+        logger.info("Clave revocada: %s (%s)", key_id, motivo)
+
+    async def listar_claves(self, device_id: UUID) -> list[dict[str, Any]]:
+        """Lista las claves de un dispositivo, incluidas las revocadas."""
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT id, label, algorithm, created_at, revoked_at,
+                       revocation_reason
+                  FROM device_keys
+                 WHERE device_id = %s
+                 ORDER BY created_at DESC
+                """,
+                (device_id,),
+            )
+            return await cur.fetchall()
