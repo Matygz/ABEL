@@ -29,6 +29,7 @@ class ConfigNodo:
     certificado_nucleo: str
     cola_db: str = "datos/cola.db"
     durabilidad: str = "normal"
+    sensores: tuple[str, ...] = ()
 
 
 def cargar_config(ruta: Path = ARCHIVO_POR_DEFECTO) -> ConfigNodo:
@@ -91,4 +92,5 @@ def cargar_config(ruta: Path = ARCHIVO_POR_DEFECTO) -> ConfigNodo:
         certificado_nucleo=cert_nucleo,
         cola_db=datos.get("cola_db", "datos/cola.db"),
         durabilidad=datos.get("durabilidad", "normal"),
+        sensores=tuple(datos.get("sensores", [])),
     )

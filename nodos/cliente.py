@@ -30,6 +30,11 @@ from protocolos.contenidos import (
     leer_challenge,
     leer_welcome,
 )
+from comun.planificador import Planificador, Tarea
+from nodos.sensores import RegistroSensores, crear_emisor
+from nodos.sensores_sistema import construir_sensores
+
+
 from protocolos.firma import a_texto, desde_texto, firmar, material_a_firmar
 from protocolos.mensajes import ErrorProtocolo, TipoMensaje, deserializar
 
@@ -50,6 +55,11 @@ class ClienteNodo:
         self._inicio = datetime.now(timezone.utc)
         self._sesion: Welcome | None = None
         self._contexto_tls = self._construir_contexto_tls(config.certificado_nucleo)
+        self._registro = RegistroSensores()
+        for sensor in construir_sensores():
+            self._registro.registrar(sensor)
+        self._emitir = crear_emisor(self._cola)
+        self._planificador = Planificador()
 
     @staticmethod
     def _construir_contexto_tls(certificado: str) -> ssl.SSLContext:
@@ -101,14 +111,27 @@ class ClienteNodo:
             await asyncio.sleep(ESPERA_RECONEXION)
 
     async def _sesion_completa(self, ws) -> None:
-        """Saluda y luego alterna entre enviar pendientes y marcar presencia."""
+        """Saluda y mantiene la sesión: envía pendientes y marca presencia.
+
+        El envío corre más seguido que la presencia: los sensores encolan a su
+        propio ritmo y no tiene sentido que un dato espere un ciclo completo
+        de presencia para salir.
+        """
         await self._saludar(ws)
 
-        while True:
-            await self._marcar_presencia(ws)
-            await self._enviar_pendientes(ws)
-            await self._dormir(self._sesion.presence_interval_seconds)
+        segundos_desde_presencia = 0.0
+        intervalo_envio = 2.0
 
+        while True:
+            await self._enviar_pendientes(ws)
+
+            if segundos_desde_presencia >= self._sesion.presence_interval_seconds:
+                await self._marcar_presencia(ws)
+                segundos_desde_presencia = 0.0
+
+            await self._dormir(intervalo_envio)
+            segundos_desde_presencia += intervalo_envio
+            
     async def _dormir(self, segundos: float) -> None:
         """Duerme en tramos cortos para que Ctrl+C se atienda rápido en Windows."""
         restante = segundos
@@ -121,7 +144,7 @@ class ClienteNodo:
         await ws.send(
             crear_hello(
                 device_id=self._config.device_id,
-                capabilities=list(self._config.capabilities),
+                capabilities=self._registro.capacidades(),
                 client_version=VERSION_CLIENTE,
             ).serializar()
         )
@@ -195,4 +218,44 @@ class ClienteNodo:
 
     async def _marcar_presencia(self, ws) -> None:
         uptime = (datetime.now(timezone.utc) - self._inicio).total_seconds()
-        self.observar("presence_mark", {"uptime_seconds": round(uptime, 1)})
+        self._emitir(
+            "presence_mark",
+            {
+                "uptime_seconds": round(uptime, 1),
+                "sensors": self._registro.estado(),
+                "queued": len(self._cola),
+            },
+        )
+
+    async def iniciar_sensores(self) -> None:
+        """Inicia los sensores configurados y los registra en el planificador.
+
+        Se llama una vez, antes de conectar: los sensores captan aunque no
+        haya enlace, que es el punto de tener cola.
+        """
+        await self._registro.iniciar_todos(list(self._config.sensores))
+
+        for sensor in self._registro.habilitados():
+            self._planificador.registrar(
+                Tarea(
+                    nombre=f"sensor:{sensor.nombre}",
+                    funcion=self._envolver(sensor),
+                    intervalo_segundos=sensor.intervalo_segundos,
+                )
+            )
+
+        habilitados = len(self._registro.habilitados())
+        total = len(self._registro.todos())
+        logger.info("Sensores activos: %d de %d.", habilitados, total)
+
+    def _envolver(self, sensor):
+        """Adapta la firma del sensor a la que espera el planificador."""
+
+        async def ejecutar() -> None:
+            await sensor.capturar(self._emitir)
+
+        return ejecutar
+
+    async def ejecutar_sensores(self) -> None:
+        """Corre el planificador de sensores. Independiente de la conexión."""
+        await self._planificador.iniciar()

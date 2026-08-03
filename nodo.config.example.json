@@ -6,5 +6,6 @@
   "clave_privada": "claves/mi-nodo.key",
   "certificado_nucleo": "certs/nucleo.crt",
   "cola_db": "datos/cola.db",
-  "durabilidad": "normal"
+  "durabilidad": "normal",
+  "sensores": ["sesion", "recursos"]
 }

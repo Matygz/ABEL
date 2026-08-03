@@ -31,7 +31,11 @@ async def main() -> int:
     cliente = ClienteNodo(config)
 
     try:
-        await cliente.ejecutar()
+        await cliente.iniciar_sensores()
+        await asyncio.gather(
+            cliente.ejecutar_sensores(),
+            cliente.ejecutar(),
+        )
     except asyncio.CancelledError:
         logger.info("Nodo detenido.")
     return 0
