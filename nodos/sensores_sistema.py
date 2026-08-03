@@ -84,17 +84,28 @@ class RecursosSistema:
     """
 
     async def capturar(self, emitir: Emisor) -> None:
-        datos = {
-            "cpu_percent": psutil.cpu_percent(interval=None),
-            "memory_percent": psutil.virtual_memory().percent,
-        }
+        inactividad = self._segundos_inactivo()
+        estado = "idle" if inactividad >= self._umbral else "active"
 
-        bateria = psutil.sensors_battery()
-        if bateria is not None:
-            datos["battery_percent"] = bateria.percent
-            datos["power_plugged"] = bateria.power_plugged
+        if estado == self._ultimo_estado:
+            return
 
-        emitir("system_resources", datos)
+        # La primera lectura tras un reinicio no es una transición real: el
+        # estado previo se perdió con el proceso. Solo se reporta si es idle,
+        # que sí es informativo — arrancar con el usuario activo es lo normal.
+        if self._ultimo_estado is None and estado == "active":
+            self._ultimo_estado = estado
+            return
+
+        emitir(
+            "session_state",
+            {
+                "state": estado,
+                "idle_seconds": round(inactividad, 1),
+                "previous": self._ultimo_estado,
+            },
+        )
+        self._ultimo_estado = estado
 
 
 def construir_sensores() -> list[Sensor]:
