@@ -24,7 +24,7 @@ verificar por partes:
 |---|---|---|
 | 2.1 | Tabla `devices` y registro de dispositivos | Cerrada |
 | 2.2 | WebSocket sin cifrar, en localhost | Cerrada |
-| 2.3 | Autenticación de Nodos | Pendiente |
+| 2.3 | Autenticación de Nodos | Cerrada |
 | 2.4 | TLS | Pendiente |
 | 2.5 | Nodo con SQLite y reconexión | Pendiente |
 
@@ -198,9 +198,6 @@ Los datos mostraron el bug antes que la lectura del código.
 
 ## Lo que la fase todavía NO tiene
 
-**Sin autenticación.** Cualquiera que copie `nodo.config.json` se hace pasar por
-el dispositivo. Por eso el servidor escucha solo en `127.0.0.1`.
-
 **Sin cifrado.** Los mensajes viajan en claro.
 
 **Cola en memoria.** Se pierde si el Nodo se reinicia. Hoy el Nodo sobrevive a
@@ -250,3 +247,16 @@ reintenta cada 5 s indefinidamente. Un retroceso exponencial sería más prudent
 **Recarga de configuración en caliente.** Sigue pendiente desde la Fase 1.
 `presence_interval_seconds` se lee al arrancar; cambiarlo requiere reiniciar.
 Ahora afecta también a lo que el Núcleo anuncia en el `welcome`.
+
+## 2.3 — Autenticación
+
+- Firma Ed25519 con desafío de un solo uso (0021).
+- Tabla `device_keys` con historial y rotación.
+- Comandos `generar-clave` y `claves` en el script de dispositivos.
+- Identificador de conexión en los logs del servidor.
+
+Archivo de esquema: `db/schema/007_device_keys.sql`.
+
+**Ya no aplica** lo que decía la sección anterior sobre que cualquiera que
+copie `nodo.config.json` puede suplantar al dispositivo: el archivo hoy
+apunta a una clave privada que no está en el repositorio ni viaja por la red.

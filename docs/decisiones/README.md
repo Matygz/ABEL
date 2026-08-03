@@ -42,3 +42,4 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0018 | Superficie mínima de error por el cable | Vigente | 2.2 |
 | 0019 | El Nodo se programa como remoto | Vigente | 2.2 |
 | 0020 | Servicios en el planificador | Vigente | 2.2 |
+| 0021 | Autenticación por firma con desafío | Vigente | 2.3 |
