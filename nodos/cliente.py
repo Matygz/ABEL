@@ -33,7 +33,7 @@ from protocolos.contenidos import (
 from comun.planificador import Planificador, Tarea
 from nodos.sensores import RegistroSensores, crear_emisor
 from nodos.sensores_sistema import construir_sensores
-
+from nodos.sensores_ventana import construir_sensores_ventana
 
 from protocolos.firma import a_texto, desde_texto, firmar, material_a_firmar
 from protocolos.mensajes import ErrorProtocolo, TipoMensaje, deserializar
@@ -56,7 +56,7 @@ class ClienteNodo:
         self._sesion: Welcome | None = None
         self._contexto_tls = self._construir_contexto_tls(config.certificado_nucleo)
         self._registro = RegistroSensores()
-        for sensor in construir_sensores():
+        for sensor in construir_sensores() + construir_sensores_ventana():
             self._registro.registrar(sensor)
         self._emitir = crear_emisor(self._cola)
         self._planificador = Planificador()
@@ -131,7 +131,7 @@ class ClienteNodo:
 
             await self._dormir(intervalo_envio)
             segundos_desde_presencia += intervalo_envio
-            
+
     async def _dormir(self, segundos: float) -> None:
         """Duerme en tramos cortos para que Ctrl+C se atienda rápido en Windows."""
         restante = segundos

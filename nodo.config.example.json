@@ -7,5 +7,5 @@
   "certificado_nucleo": "certs/nucleo.crt",
   "cola_db": "datos/cola.db",
   "durabilidad": "normal",
-  "sensores": ["sesion", "recursos"]
+  "sensores": ["sesion", "recursos", "ventana"]
 }
