@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
-from nucleo.errores import ErrorOperativo
+from comun.errores import ErrorOperativo
 
 logger = logging.getLogger(__name__)
 

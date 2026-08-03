@@ -26,7 +26,7 @@ from psycopg.types.json import Jsonb
 
 
 from nucleo.config import ConfigEntorno
-from nucleo.errores import ErrorOperativo
+from comun.errores import ErrorOperativo
 
 from typing import Any, AsyncIterator, Sequence
 

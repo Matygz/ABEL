@@ -10,7 +10,7 @@ from nucleo.ciclo_vida import CicloVida
 from nucleo.config import cargar_config
 from nucleo.datos.repositorio import Repositorio
 from nucleo.logging_setup import ajustar_nivel, configurar_logging
-from nucleo.planificador import Planificador, Tarea
+from comun.planificador import Planificador, Tarea
 from nucleo.tareas.presencia import crear_tarea_presencia
 from nucleo.red.servidor import ServidorNodos
 
