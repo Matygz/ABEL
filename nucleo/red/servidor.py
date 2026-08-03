@@ -4,12 +4,13 @@ Acepta conexiones de Nodos, valida su identidad contra `devices`, recibe
 observaciones y las persiste. Cada conexión se maneja de forma independiente:
 un Nodo que se porta mal no afecta a los demás.
 
-Fase 2.2: sin TLS ni autenticación. Escucha solo en localhost. La credencial
-del `hello` se acepta vacía; la 2.3 la hace obligatoria.
+Fase 2.3: autenticación por firma Ed25519 con desafío. Sin TLS todavía:
+escucha solo en localhost.
 """
 
 from __future__ import annotations
 
+import secrets
 import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid7
@@ -82,10 +83,10 @@ class ServidorNodos:
 
     async def _atender(self, conexion: ServerConnection) -> None:
         """Maneja una conexión completa, desde el saludo hasta el cierre."""
-        remoto = conexion.remote_address
-        logger.debug("Conexión entrante desde %s", remoto)
+        cid = secrets.token_hex(3)
+        logger.debug("[%s] Conexión entrante desde %s", cid, conexion.remote_address)
 
-        dispositivo = await self._saludar(conexion)
+        dispositivo = await self._saludar(conexion, cid)
         if dispositivo is None:
             return
 
@@ -98,12 +99,12 @@ class ServidorNodos:
             device_id, "device_connected",
             {"session_id": str(session_id), "trust_level": dispositivo["trust_level"]},
         )
-        logger.info("Nodo conectado: %s (%s)", nombre, device_id)
+        logger.info("[%s] Nodo conectado: %s (%s)", cid, nombre, device_id)
 
         motivo = "closed"
         try:
             async for crudo in conexion:
-                await self._procesar(conexion, device_id, crudo)
+                await self._procesar(conexion, device_id, crudo, cid)
         except websockets.ConnectionClosedError:
             motivo = "link_lost"
         except websockets.ConnectionClosedOK:
@@ -114,9 +115,9 @@ class ServidorNodos:
                 device_id, "device_disconnected",
                 {"session_id": str(session_id), "reason": motivo},
             )
-            logger.info("Nodo desconectado: %s (%s)", nombre, motivo)
+            logger.info("[%s] Nodo desconectado: %s (%s)", cid, nombre, motivo)
 
-    async def _saludar(self, conexion: ServerConnection) -> dict | None:
+    async def _saludar(self, conexion: ServerConnection, cid: str) -> dict | None:
         """Procesa el saludo en tres pasos. Devuelve el dispositivo, o None.
 
         1. El Nodo declara su device_id.
@@ -129,7 +130,7 @@ class ServidorNodos:
         Antes de completar la autenticación, un error cierra la conexión sin
         explicar (ver decisión 0018).
         """
-        hello = await self._recibir_hello(conexion)
+        hello = await self._recibir_hello(conexion, cid)
         if hello is None:
             return None
 
@@ -139,12 +140,12 @@ class ServidorNodos:
         desafio = generar_desafio()
         await self._enviar(conexion, crear_challenge(a_texto(desafio)))
 
-        respuesta = await self._recibir_hello(conexion)
+        respuesta = await self._recibir_hello(conexion, cid)
         if respuesta is None:
             return None
 
         if not await self._credencial_valida(
-            respuesta, dispositivo, claves, desafio, hello.device_id
+            respuesta, dispositivo, claves, desafio, hello.device_id, cid                      
         ):
             await self._enviar(conexion, crear_reject(CodigoError.UNAUTHORIZED))
             await conexion.close(code=1008)
@@ -161,24 +162,24 @@ class ServidorNodos:
         )
         return dispositivo
 
-    async def _recibir_hello(self, conexion: ServerConnection):
+    async def _recibir_hello(self, conexion: ServerConnection, cid: str) -> dict | None:
         """Recibe y valida un mensaje hello. Cierra la conexión si es inválido."""
         try:
             sobre = deserializar(await conexion.recv())
             if sobre.tipo != TipoMensaje.HELLO:
-                logger.warning("Se esperaba hello, llegó %s.", sobre.tipo)
+                logger.warning("[%s] Se esperaba hello, llegó %s.", cid, sobre.tipo)
                 await conexion.close(code=1002)
                 return None
             return leer_hello(sobre)
         except ErrorProtocolo as exc:
-            logger.warning("Saludo inválido: %s", exc.detalle)
+            logger.warning("[%s] Saludo inválido: %s", cid, exc.detalle)
             await conexion.close(code=1002)
             return None
         except (websockets.ConnectionClosed, TimeoutError):
             return None
 
     async def _credencial_valida(
-        self, respuesta, dispositivo, claves, desafio, device_id
+        self, respuesta, dispositivo, claves, desafio, device_id, cid: str
     ) -> bool:
         """Verifica la firma. Registra el fallo, pero no revela el motivo.
 
@@ -196,20 +197,20 @@ class ServidorNodos:
                 firma_valida = False
 
         if respuesta.device_id != device_id:
-            logger.warning("El device_id cambió entre los dos hello.")
+            logger.warning("[%s] El device_id cambió entre los dos hello.", cid)
             firma_valida = False
 
         if dispositivo is None:
-            logger.warning("Dispositivo %s no autorizado o revocado.", device_id)
+            logger.warning("[%s] Dispositivo %s no autorizado o revocado.", cid, device_id)
             return False
 
         if not claves:
-            logger.warning("Dispositivo %s no tiene claves registradas.", device_id)
+            logger.warning("[%s] Dispositivo %s no tiene claves registradas.", cid, device_id)
             await self._registrar_fallo_auth(device_id, "no_keys")
             return False
 
         if not firma_valida:
-            logger.warning("Firma inválida de %s.", device_id)
+            logger.warning("[%s] Firma inválida de %s.", cid, device_id)
             await self._registrar_fallo_auth(device_id, "invalid_signature")
             return False
 
@@ -226,35 +227,35 @@ class ServidorNodos:
             logger.error("No se pudo registrar auth_failed: %s", exc)
 
     async def _procesar(
-        self, conexion: ServerConnection, device_id: UUID, crudo: str | bytes
+        self, conexion: ServerConnection, device_id: UUID, crudo: str | bytes, cid: str
     ) -> None:
         """Procesa un mensaje de un Nodo ya identificado."""
         try:
             sobre = deserializar(crudo)
         except ErrorProtocolo as exc:
-            logger.warning("Mensaje inválido de %s: %s", device_id, exc.detalle)
+            logger.warning("[%s] Mensaje inválido de %s: %s", cid, device_id, exc.detalle)
             await self._enviar(conexion, crear_error(exc.codigo))
             return
 
         try:
             if sobre.tipo == TipoMensaje.OBSERVATION:
-                await self._recibir_observaciones(conexion, device_id, sobre)
+                await self._recibir_observaciones(conexion, device_id, sobre, cid)
             elif sobre.tipo == TipoMensaje.PRESENCE_MARK:
-                await self._recibir_presencia(device_id, sobre)
+                await self._recibir_presencia(device_id, sobre, cid)
             else:
                 logger.warning(
-                    "Tipo inesperado de %s: %s", device_id, sobre.tipo
+                    "[%s] Tipo inesperado de %s: %s", cid, device_id, sobre.tipo
                 )
                 await self._enviar(conexion, crear_error(CodigoError.MALFORMED))
         except ErrorProtocolo as exc:
-            logger.warning("Contenido inválido de %s: %s", device_id, exc.detalle)
+            logger.warning("[%s] Contenido inválido de %s: %s", cid, device_id, exc.detalle)
             await self._enviar(conexion, crear_error(exc.codigo))
         except ErrorRepositorio as exc:
-            logger.error("Fallo al persistir datos de %s: %s", device_id, exc)
+            logger.error("[%s] Fallo al persistir datos de %s: %s", cid, device_id, exc)
             await self._enviar(conexion, crear_error(CodigoError.INTERNAL))
 
     async def _recibir_observaciones(
-        self, conexion: ServerConnection, device_id: UUID, sobre: Sobre
+        self, conexion: ServerConnection, device_id: UUID, sobre: Sobre, cid: str
     ) -> None:
         """Persiste un lote y confirma. El ack se envía solo después de escribir."""
         observaciones = leer_observation(sobre, maximo=MAX_OBSERVACIONES_POR_LOTE)
@@ -265,11 +266,11 @@ class ServidorNodos:
 
         await self._enviar(conexion, crear_ack(confirmadas, rechazadas))
         logger.debug(
-            "Lote de %s: %d confirmada(s), %d rechazada(s).",
-            device_id, len(confirmadas), len(rechazadas),
+            "[%s] Lote de %s: %d confirmada(s), %d rechazada(s).",
+            cid, device_id, len(confirmadas), len(rechazadas),
         )
 
-    async def _recibir_presencia(self, device_id: UUID, sobre: Sobre) -> None:
+    async def _recibir_presencia(self, device_id: UUID, sobre: Sobre, cid: str) -> None:
         """Registra la marca de presencia de un Nodo."""
         await self._repo.registrar_evento(
             event_type="presence_mark",
