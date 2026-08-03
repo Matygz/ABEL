@@ -1,8 +1,10 @@
 {
   "device_id": "",
   "nombre": "",
-  "servidor_url": "ws://127.0.0.1:8765",
+  "servidor_url": "wss://127.0.0.1:8765",
   "capabilities": ["presence"],
   "clave_privada": "claves/mi-nodo.key",
-  "certificado_nucleo": "certs/certificado.crt"
+  "certificado_nucleo": "certs/nucleo.crt",
+  "cola_db": "datos/cola.db",
+  "durabilidad": "normal"
 }

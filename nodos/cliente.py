@@ -44,7 +44,9 @@ class ClienteNodo:
 
     def __init__(self, config: ConfigNodo) -> None:
         self._config = config
-        self._cola = ColaObservaciones()
+        self._cola = ColaObservaciones(
+            ruta=config.cola_db, durabilidad=config.durabilidad
+        )
         self._inicio = datetime.now(timezone.utc)
         self._sesion: Welcome | None = None
         self._contexto_tls = self._construir_contexto_tls(config.certificado_nucleo)
