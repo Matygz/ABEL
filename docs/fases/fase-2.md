@@ -1,6 +1,6 @@
 # Fase 2 — Comunicación y primer Nodo
 
-**Estado:** En curso — 2.1 y 2.2 cerradas
+**Estado:** Cerrada
 **Versión del proyecto:** 0.0.1
 
 ## Objetivo
@@ -25,8 +25,8 @@ verificar por partes:
 | 2.1 | Tabla `devices` y registro de dispositivos | Cerrada |
 | 2.2 | WebSocket sin cifrar, en localhost | Cerrada |
 | 2.3 | Autenticación de Nodos | Cerrada |
-| 2.4 | TLS | Pendiente |
-| 2.5 | Nodo con SQLite y reconexión | Pendiente |
+| 2.4 | TLS | Cerrada |
+| 2.5 | Nodo con SQLite y reconexión | Cerrada |
 
 El orden importa: **WebSocket antes que TLS**, para poder depurar el protocolo
 viendo los mensajes en claro. Meter cifrado antes de que la comunicación
@@ -260,3 +260,134 @@ Archivo de esquema: `db/schema/007_device_keys.sql`.
 **Ya no aplica** lo que decía la sección anterior sobre que cualquiera que
 copie `nodo.config.json` puede suplantar al dispositivo: el archivo hoy
 apunta a una clave privada que no está en el repositorio ni viaja por la red.
+
+---
+
+## 2.3 — Autenticación
+
+- Firma Ed25519 con desafío de un solo uso (0021).
+- Tabla `device_keys` con historial, rotación y revocación independiente.
+- Comandos `generar-clave` y `claves` en el script de dispositivos.
+- Identificador de conexión en los logs del servidor.
+
+Archivo de esquema: `db/schema/007_device_keys.sql`.
+
+El `device_id` deja de ser una credencial: pasa a ser un nombre público, y la
+prueba de identidad es una firma que solo puede producir quien tenga la clave
+privada.
+
+**Verificación de cierre** (`tests/test_firma.py`, `tests/test_autenticacion.py`):
+
+| Caso | Resultado |
+|---|---|
+| Clave válida | `welcome` |
+| Clave inválida | `reject` |
+| Sin credencial | `reject` |
+| Dispositivo inexistente | `reject` |
+| Firma reutilizada con otro desafío | Inválida |
+| Firma reutilizada declarando otro dispositivo | Inválida |
+
+---
+
+## 2.4 — TLS
+
+- Canal cifrado, TLS 1.2 o superior.
+- Certificado autofirmado del Núcleo, con fijación en el Nodo (0022).
+- Script `scripts/certificado.py` para generar e inspeccionar.
+
+**Verificación de cierre** (`tests/test_tls.py`):
+
+| Caso | Resultado |
+|---|---|
+| Certificado del Núcleo | Conecta |
+| Certificado impostor | `rechazado (self-signed certificate)` |
+| Cliente sin TLS | `did not receive a valid HTTP response` |
+| Cliente sin verificación | Conecta, pero no puede autenticarse |
+
+El último caso muestra que **cifrar no es autenticar**: el canal se establece,
+pero sin credencial no se pasa del `hello`. Las dos capas trabajan en serie.
+
+---
+
+## 2.5 — Cola persistente
+
+- `ColaObservaciones` respaldada en SQLite, modo WAL (0023).
+- Durabilidad configurable por dispositivo.
+- La interfaz no cambió: `cliente.py` no se tocó.
+
+**Verificación de cierre:** se corta el Núcleo → el Nodo acumula → se apaga el
+Nodo por completo → se reinician ambos → `Cola recuperada del disco: 1
+pendiente(s)` → se envía → la cola queda en cero.
+
+---
+
+## Estado final de la fase
+
+| Capa | Mecanismo |
+|---|---|
+| Cifrado | TLS 1.2+ |
+| Identidad del Núcleo | Certificado fijado en cada Nodo |
+| Identidad del Nodo | Firma Ed25519 de un desafío |
+| Autorización | `devices` con niveles de confianza |
+| Integridad de datos | Idempotencia por UUID del emisor |
+| Durabilidad | Cola en SQLite + `ack` tras persistir |
+
+Confianza mutua y explícita, sin autoridades externas. Cada extremo verifica al
+otro con algo que el operador le entregó.
+
+---
+
+## Lo que la fase NO tiene
+
+**Sin enrolamiento automático.** La identidad y las claves se configuran a
+mano. Requiere criptografía —ya disponible tras la 2.3— más una interfaz para
+ser cómodo (Fase 4).
+
+**La clave privada del Nodo es un archivo copiable.** Resolverlo requiere
+almacenes seguros del sistema operativo (Keychain, Android Keystore, TPM),
+específicos de cada plataforma.
+
+**Escucha solo en localhost.** Técnicamente ya sería seguro abrirlo, pero no
+hay razón para hacerlo hasta que exista un Nodo en otra máquina.
+
+**Nunca se probó con un Nodo remoto.** La disciplina de 0019 reduce el trabajo
+de esa migración; no lo elimina. Queda pendiente al menos el desfase de relojes
+entre dispositivos.
+
+---
+
+## Pendientes acumulados
+
+| Pendiente | Origen |
+|---|---|
+| Recarga de configuración en caliente | Fase 1 |
+| Límite de cola por tamaño, no por cantidad | 0023 |
+| Durabilidad comunicada por el Núcleo en el `welcome` | 0023 |
+| Espera de reinicio de servicios con retroceso exponencial | 0020 |
+| Política de poda configurable | 0023 |
+
+---
+
+## Anotado para la Fase 3
+
+**Tres categorías de origen de datos**, que hoy se confunden en una:
+
+- **Nodos** — corren código de ABEL, hablan su protocolo, se autentican, tienen
+  cola. Son extensiones del sistema.
+- **Dispositivos externos** — cámaras IP, sensores comerciales. Hablan su
+  propio protocolo (RTSP, ONVIF, MQTT), no saben que ABEL existe. ABEL les
+  habla como cliente, con las credenciales que se le den.
+- **Nodos-puente** — un Nodo que traduce: habla con el dispositivo externo en
+  su protocolo y reporta al Núcleo en el de ABEL. Así el Núcleo no necesita
+  saber nada de la marca del dispositivo.
+
+**Sobre el acceso a dispositivos de terceros:** que un dispositivo esté en casa
+y se haya pagado no siempre implica acceso legítimo a todo lo que hace. Muchos
+solo hablan con la nube del fabricante. Usar la API o el protocolo local que el
+fabricante expone es una cosa; eludir sus mecanismos de control es otra. Cada
+dispositivo requiere su propio juicio bajo el principio 1.
+
+**Sobre lo observado y lo inferido:** cuando aparezcan módulos que infieren, la
+marca debe ser explícita en el evento, no deducida del tipo de actor. El origen
+es un proxy, no la regla: un módulo que lee la memoria del sistema está
+observando, no infiriendo.

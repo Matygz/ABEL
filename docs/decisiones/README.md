@@ -43,3 +43,5 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0019 | El Nodo se programa como remoto | Vigente | 2.2 |
 | 0020 | Servicios en el planificador | Vigente | 2.2 |
 | 0021 | Autenticación por firma con desafío | Vigente | 2.3 |
+| 0022 | TLS con fijación de certificado | Vigente | 2.4 |
+| 0023 | Cola persistente en SQLite | Vigente | 2.5 |
