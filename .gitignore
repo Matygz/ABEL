@@ -63,3 +63,4 @@ scratch/
 nodo.config.json
 claves/
 *.key
+certs/
