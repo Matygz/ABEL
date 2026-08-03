@@ -37,6 +37,8 @@ from protocolos.mensajes import (
     TipoMensaje,
     deserializar,
 )
+import ssl
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,8 @@ class ServidorNodos:
         host: str = "127.0.0.1",
         puerto: int = 8765,
         intervalo_presencia: int = 60,
+        tls_cert: str = "certs/nucleo.crt",
+        tls_clave: str = "certs/nucleo.key",
     ) -> None:
         self._repo = repositorio
         self._version = version
@@ -60,6 +64,28 @@ class ServidorNodos:
         self._puerto = puerto
         self._intervalo_presencia = intervalo_presencia
         self._sesiones: dict[UUID, ServerConnection] = {}
+        self._contexto_tls = self._construir_contexto_tls(tls_cert, tls_clave)
+
+    @staticmethod
+    def _construir_contexto_tls(cert: str, clave: str) -> ssl.SSLContext:
+        """Arma el contexto TLS del servidor.
+
+        Se exige TLS 1.2 como mínimo: las versiones anteriores tienen
+        debilidades conocidas y ya no se consideran seguras.
+        """
+        ruta_cert, ruta_clave = Path(cert), Path(clave)
+
+        for ruta in (ruta_cert, ruta_clave):
+            if not ruta.exists():
+                raise FileNotFoundError(
+                    f"No existe {ruta}. Generá el certificado con: "
+                    f"python -m scripts.certificado generar"
+                )
+
+        contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        contexto.minimum_version = ssl.TLSVersion.TLSv1_2
+        contexto.load_cert_chain(certfile=ruta_cert, keyfile=ruta_clave)
+        return contexto
 
     async def ejecutar(self) -> None:
         """Arranca el servidor y corre hasta que se lo cancele."""
@@ -67,12 +93,13 @@ class ServidorNodos:
             self._atender,
             self._host,
             self._puerto,
+            ssl=self._contexto_tls,
             ping_interval=20,
             ping_timeout=20,
             max_size=2 * 1024 * 1024,
         ) as servidor:
             logger.info(
-                "Servidor de Nodos escuchando en ws://%s:%s",
+                "Servidor de Nodos escuchando en wss://%s:%s",
                 self._host, self._puerto,
             )
             await servidor.serve_forever()

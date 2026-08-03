@@ -28,6 +28,8 @@ class ConfigEntorno:
     db_connect_timeout: int = 5
     ws_host: str = "127.0.0.1"
     ws_puerto: int = 8765
+    tls_cert: str = "certs/nucleo.crt"
+    tls_clave: str = "certs/nucleo.key"
 
     @property
     def conninfo(self) -> str:
@@ -82,4 +84,6 @@ def cargar_config() -> ConfigEntorno:
         db_password=_requerida("ABEL_DB_PASSWORD"),
         ws_host=os.getenv("ABEL_WS_HOST", "127.0.0.1"),
         ws_puerto=int(os.getenv("ABEL_WS_PORT", "8765")),
+        tls_cert=os.getenv("ABEL_TLS_CERT", "certs/nucleo.crt"),
+        tls_clave=os.getenv("ABEL_TLS_KEY", "certs/nucleo.key"),
     )

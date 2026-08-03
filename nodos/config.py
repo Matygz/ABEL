@@ -26,6 +26,7 @@ class ConfigNodo:
     servidor_url: str
     capabilities: tuple[str, ...]
     clave_privada: bytes
+    certificado_nucleo: str
 
 
 def cargar_config(ruta: Path = ARCHIVO_POR_DEFECTO) -> ConfigNodo:
@@ -70,11 +71,20 @@ def cargar_config(ruta: Path = ARCHIVO_POR_DEFECTO) -> ConfigNodo:
             f"La clave en {archivo_clave} tiene {len(clave)} bytes, "
             f"se esperaban {LARGO_CLAVE}."
         )
-
+    
+    cert_nucleo = datos.get("certificado_nucleo")
+    if not cert_nucleo:
+        raise ErrorConfigNodo(
+            f"Falta 'certificado_nucleo' en {ruta}. Copiá certs/nucleo.crt "
+            f"desde el Núcleo y apuntá a él."
+        )
+    if not Path(cert_nucleo).exists():
+        raise ErrorConfigNodo(f"No existe el certificado del Núcleo: {cert_nucleo}")
     return ConfigNodo(
         device_id=device_id,
         nombre=datos["nombre"],
         servidor_url=datos["servidor_url"],
         capabilities=tuple(datos.get("capabilities", ["presence"])),
         clave_privada=clave,
+        certificado_nucleo=cert_nucleo,
     )

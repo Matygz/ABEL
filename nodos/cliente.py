@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
+from pathlib import Path
 from datetime import datetime, timezone
 from uuid import uuid7
 
@@ -45,6 +47,23 @@ class ClienteNodo:
         self._cola = ColaObservaciones()
         self._inicio = datetime.now(timezone.utc)
         self._sesion: Welcome | None = None
+        self._contexto_tls = self._construir_contexto_tls(config.certificado_nucleo)
+
+    @staticmethod
+    def _construir_contexto_tls(certificado: str) -> ssl.SSLContext:
+        """Arma el contexto TLS del cliente.
+
+        Confía únicamente en el certificado del Núcleo (fijación), no en las
+        autoridades del sistema. Es más estricto que el modelo de internet:
+        un navegador acepta cualquier certificado firmado por cualquiera de
+        sus autoridades; este cliente acepta exactamente uno.
+        """
+        contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        contexto.minimum_version = ssl.TLSVersion.TLSv1_2
+        contexto.load_verify_locations(cafile=str(Path(certificado)))
+        contexto.check_hostname = True
+        contexto.verify_mode = ssl.CERT_REQUIRED
+        return contexto
 
     def observar(self, event_type: str, data: dict) -> None:
         """Encola una observación. No requiere conexión."""
@@ -61,6 +80,7 @@ class ClienteNodo:
         """Conecta y mantiene la sesión, reconectando ante cualquier corte."""
         async for ws in connect(
             self._config.servidor_url,
+            ssl=self._contexto_tls,
             open_timeout=10,
             ping_interval=20,
             ping_timeout=20,

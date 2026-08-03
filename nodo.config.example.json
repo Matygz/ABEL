@@ -3,5 +3,6 @@
   "nombre": "",
   "servidor_url": "ws://127.0.0.1:8765",
   "capabilities": ["presence"],
-  "clave_privada": "claves/mi-nodo.key"
+  "clave_privada": "claves/mi-nodo.key",
+  "certificado_nucleo": "certs/certificado.crt"
 }

@@ -51,6 +51,8 @@ async def main() -> None:
             host=config.ws_host,
             puerto=config.ws_puerto,
             intervalo_presencia=int(intervalo),
+            tls_cert=config.tls_cert,
+            tls_clave=config.tls_clave,
         )
         planificador.registrar_servicio("servidor_nodos", servidor.ejecutar)
 
