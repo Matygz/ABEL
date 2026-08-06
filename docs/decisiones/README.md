@@ -45,3 +45,7 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0021 | Autenticación por firma con desafío | Vigente | 2.3 |
 | 0022 | TLS con fijación de certificado | Vigente | 2.4 |
 | 0023 | Cola persistente en SQLite | Vigente | 2.5 |
+| 0024 | Estructura de sensores | Vigente | 3.1 |
+| 0025 | Manejo de ruido en sensores | Vigente | 3.2 |
+| 0026 | Registro de títulos de ventana | Vigente | 3.2 |
+| 0027 | Módulo de memoria | Vigente | 3.3 |
