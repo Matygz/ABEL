@@ -24,6 +24,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+import hashlib
+import secrets
 
 from comun.eventos import BusEventos
 from nucleo.config import ConfigEntorno
@@ -35,6 +37,7 @@ from protocolos.contenidos import Observacion
 
 logger = logging.getLogger(__name__)
 
+
 class ErrorRepositorio(ErrorOperativo):
     """Fallo al acceder a la base de datos."""
     
@@ -43,6 +46,7 @@ class Repositorio:
 
     def __init__(self, config: ConfigEntorno, bus: "BusEventos | None" = None) -> None:
         self._config = config
+        self._conninfo = config.conninfo
         self._bus = bus
 
     @asynccontextmanager
@@ -194,6 +198,18 @@ class Repositorio:
         if fila is None:
             raise ErrorRepositorio(f"No existe el usuario {username!r}.")
         return fila
+
+    async def listar_usuarios(self) -> list[dict[str, Any]]:
+        """Lista los usuarios registrados."""
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT u.id, u.username, u.full_name, u.role, a.name
+                  FROM users u JOIN actors a ON a.id = u.id
+                 ORDER BY u.username
+                """
+            )
+            return await cur.fetchall()
 
     # ------------------------------------------------------------------
     # Dispositivos
@@ -541,3 +557,180 @@ class Repositorio:
                 (device_id,),
             )
             return await cur.fetchall()
+
+    # ------------------------------------------------------------------
+    # Sesiones de interfaz
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _hash_token(token: str) -> bytes:
+        """Hash del token de sesión.
+
+        SHA-256 alcanza: el token es aleatorio de 32 bytes, no un secreto
+        elegido por una persona. Argon2 está diseñado para resistir fuerza
+        bruta contra contraseñas débiles, y acá no hay nada que adivinar.
+        """
+        return hashlib.sha256(token.encode("ascii")).digest()
+
+    async def abrir_sesion(
+        self,
+        user_id: UUID,
+        device_id: UUID,
+        duracion_horas: int = 720,
+    ) -> str:
+        """Crea una sesión y devuelve su token.
+
+        El token se devuelve una sola vez: en la base queda solo su hash.
+        """
+        token = secrets.token_urlsafe(32)
+
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    INSERT INTO sessions
+                        (user_id, device_id, token_hash, expires_at)
+                    VALUES (%s, %s, %s, now() + (%s * INTERVAL '1 hour'))
+                    RETURNING id
+                    """,
+                    (user_id, device_id, self._hash_token(token), duracion_horas),
+                )
+                session_id = (await cur.fetchone())["id"]
+
+                await conn.execute(
+                    """
+                    INSERT INTO events (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'session_opened', %s, %s)
+                    """,
+                    (
+                        user_id,
+                        Jsonb({
+                            "session_id": str(session_id),
+                            "device_id": str(device_id),
+                        }),
+                    ),
+                )
+
+        logger.info("Sesión abierta: %s en dispositivo %s", session_id, device_id)
+        return token
+
+    async def validar_sesion(self, token: str) -> dict[str, Any] | None:
+        """Devuelve los datos de la sesión si el token es válido.
+
+        Actualiza `last_seen_at` en el mismo paso: permite saber qué sesiones
+        están realmente en uso y cuáles quedaron abandonadas.
+        """
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE sessions
+                   SET last_seen_at = now()
+                 WHERE token_hash = %s
+                   AND revoked_at IS NULL
+                   AND expires_at > now()
+                RETURNING id, user_id, device_id, created_at, expires_at
+                """,
+                (self._hash_token(token),),
+            )
+            sesion = await cur.fetchone()
+
+            if sesion is None:
+                return None
+
+            cur = await conn.execute(
+                """
+                SELECT u.username, u.full_name, u.role, a.name AS display_name,
+                       d.trust_level, da.name AS device_name
+                  FROM users u
+                  JOIN actors a ON a.id = u.id
+                  JOIN devices d ON d.id = %s
+                  JOIN actors da ON da.id = d.id
+                 WHERE u.id = %s
+                   AND d.revoked_at IS NULL
+                """,
+                (sesion["device_id"], sesion["user_id"]),
+            )
+            contexto = await cur.fetchone()
+
+        if contexto is None:
+            return None
+
+        return {**sesion, **contexto}
+
+    async def cerrar_sesion(self, token: str, cerrada_por: UUID | None = None) -> None:
+        """Revoca una sesión."""
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    UPDATE sessions
+                       SET revoked_at = now(), revoked_by = %s
+                     WHERE token_hash = %s AND revoked_at IS NULL
+                    RETURNING id, user_id
+                    """,
+                    (cerrada_por, self._hash_token(token)),
+                )
+                fila = await cur.fetchone()
+                if fila is None:
+                    return
+
+                await conn.execute(
+                    """
+                    INSERT INTO events (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'session_closed', %s, %s)
+                    """,
+                    (fila["user_id"], Jsonb({"session_id": str(fila["id"])})),
+                )
+
+    async def listar_sesiones(self, solo_activas: bool = True) -> list[dict[str, Any]]:
+        """Lista las sesiones registradas, para poder cerrarlas a distancia."""
+        condicion = (
+            "WHERE s.revoked_at IS NULL AND s.expires_at > now()"
+            if solo_activas else ""
+        )
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                f"""
+                SELECT s.id, s.created_at, s.last_seen_at, s.expires_at,
+                       s.revoked_at,
+                       ua.name AS usuario, da.name AS dispositivo
+                  FROM sessions s
+                  JOIN actors ua ON ua.id = s.user_id
+                  JOIN actors da ON da.id = s.device_id
+                  {condicion}
+                 ORDER BY s.last_seen_at DESC
+                """
+            )
+            return await cur.fetchall()
+
+    async def revocar_sesion_por_id(
+        self, session_id: UUID, revocada_por: UUID
+    ) -> None:
+        """Cierra una sesión sin conocer su token. Para cerrar a distancia."""
+        async with self._conexion() as conn:
+            async with conn.transaction():
+                cur = await conn.execute(
+                    """
+                    UPDATE sessions
+                       SET revoked_at = now(), revoked_by = %s
+                     WHERE id = %s AND revoked_at IS NULL
+                    RETURNING user_id
+                    """,
+                    (revocada_por, session_id),
+                )
+                fila = await cur.fetchone()
+                if fila is None:
+                    raise ErrorRepositorio(
+                        f"La sesión {session_id} no existe o ya estaba cerrada."
+                    )
+
+                await conn.execute(
+                    """
+                    INSERT INTO events (occurred_at, event_type, actor_id, payload)
+                    VALUES (now(), 'session_closed', %s, %s)
+                    """,
+                    (
+                        fila["user_id"],
+                        Jsonb({"session_id": str(session_id), "reason": "revoked"}),
+                    ),
+                )

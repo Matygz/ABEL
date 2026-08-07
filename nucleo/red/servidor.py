@@ -10,6 +10,7 @@ escucha solo en localhost.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 import logging
 from datetime import datetime, timezone
@@ -25,11 +26,16 @@ from protocolos.contenidos import (
     crear_challenge,
     crear_error,
     crear_reject,
+    crear_session_request,
     crear_welcome,
     leer_hello,
     leer_observation,
+    leer_session_grant,
 )
-from protocolos.firma import a_texto, generar_desafio, material_a_firmar, verificar, desde_texto, ErrorFirma
+from protocolos.firma import (
+    ErrorFirma, a_texto, desde_texto, generar_desafio,
+    material_a_firmar, material_sesion, verificar,
+)
 from protocolos.mensajes import (
     CodigoError,
     ErrorProtocolo,
@@ -64,8 +70,9 @@ class ServidorNodos:
         self._puerto = puerto
         self._intervalo_presencia = intervalo_presencia
         self._sesiones: dict[UUID, ServerConnection] = {}
+        self._ips: dict[str, UUID] = {}
+        self._solicitudes: dict[UUID, asyncio.Future] = {}
         self._contexto_tls = self._construir_contexto_tls(tls_cert, tls_clave)
-
     @staticmethod
     def _construir_contexto_tls(cert: str, clave: str) -> ssl.SSLContext:
         """Arma el contexto TLS del servidor.
@@ -121,6 +128,8 @@ class ServidorNodos:
         nombre = dispositivo["name"]
         session_id = uuid7()
         self._sesiones[device_id] = conexion
+        if conexion.remote_address:
+            self._ips[conexion.remote_address[0]] = device_id
 
         await self._registrar_evento_conexion(
             device_id, "device_connected",
@@ -138,6 +147,8 @@ class ServidorNodos:
             motivo = "closed"
         finally:
             self._sesiones.pop(device_id, None)
+            if conexion.remote_address:
+                self._ips.pop(conexion.remote_address[0], None)
             await self._registrar_evento_conexion(
                 device_id, "device_disconnected",
                 {"session_id": str(session_id), "reason": motivo},
@@ -269,6 +280,8 @@ class ServidorNodos:
                 await self._recibir_observaciones(conexion, device_id, sobre, cid)
             elif sobre.tipo == TipoMensaje.PRESENCE_MARK:
                 await self._recibir_presencia(device_id, sobre, cid)
+            elif sobre.tipo == TipoMensaje.SESSION_GRANT:
+                self._recibir_concesion(sobre, cid)
             else:
                 logger.warning(
                     "[%s] Tipo inesperado de %s: %s", cid, device_id, sobre.tipo
@@ -328,3 +341,58 @@ class ServidorNodos:
             )
         except ErrorRepositorio as exc:
             logger.error("No se pudo registrar %s de %s: %s", tipo, device_id, exc)
+
+    # ------------------------------------------------------------------
+    # Vinculación de sesiones de interfaz
+    # ------------------------------------------------------------------
+
+    def dispositivo_en(self, direccion: str) -> UUID | None:
+        """Qué dispositivo tiene un Nodo conectado desde esa dirección.
+
+        Es la forma de relacionar un navegador con el Nodo de su misma
+        máquina. Implica que quien esté en ese dispositivo puede obtener
+        sesión: el dispositivo es la credencial.
+        """
+        return self._ips.get(direccion)
+
+    async def solicitar_firma_de_sesion(
+        self, device_id: UUID, timeout: float = 15.0
+    ) -> tuple[UUID, bytes, str] | None:
+        """Pide al Nodo que autorice una sesión. Devuelve lo necesario para
+        verificar, o None si no respondió a tiempo.
+        """
+        conexion = self._sesiones.get(device_id)
+        if conexion is None:
+            return None
+
+        solicitud_id = uuid7()
+        desafio = generar_desafio()
+        futuro: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._solicitudes[solicitud_id] = futuro
+
+        try:
+            await self._enviar(
+                conexion, crear_session_request(solicitud_id, a_texto(desafio))
+            )
+            firma = await asyncio.wait_for(futuro, timeout=timeout)
+            return solicitud_id, desafio, firma
+        except TimeoutError:
+            logger.warning(
+                "El Nodo %s no autorizó la sesión en %ss.", device_id, timeout
+            )
+            return None
+        finally:
+            self._solicitudes.pop(solicitud_id, None)
+
+    def _recibir_concesion(self, sobre: Sobre, cid: str) -> None:
+        """Entrega la firma a quien la estaba esperando."""
+        concesion = leer_session_grant(sobre)
+        futuro = self._solicitudes.get(concesion.solicitud_id)
+
+        if futuro is None or futuro.done():
+            logger.warning(
+                "[%s] Concesión de sesión sin solicitud pendiente.", cid
+            )
+            return
+
+        futuro.set_result(concesion.firma)

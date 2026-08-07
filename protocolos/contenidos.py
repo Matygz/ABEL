@@ -287,3 +287,54 @@ def crear_reject(codigo: str) -> Sobre:
 
 def crear_error(codigo: str = CodigoError.MALFORMED) -> Sobre:
     return Sobre(tipo=TipoMensaje.ERROR, payload={"code": codigo})
+
+# ----------------------------------------------------------------------
+# session_request / session_grant
+# ----------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class SolicitudSesion:
+    solicitud_id: UUID
+    desafio: str
+
+
+def crear_session_request(solicitud_id: UUID, desafio: str) -> Sobre:
+    """El Núcleo pide al Nodo que autorice una sesión de interfaz.
+
+    Primer mensaje que el Núcleo inicia hacia un Nodo. El sobre siempre fue
+    bidireccional (ver 0016); no hizo falta cambiar nada estructural.
+    """
+    return Sobre(
+        tipo=TipoMensaje.SESSION_REQUEST,
+        payload={"request_id": str(solicitud_id), "challenge": desafio},
+    )
+
+
+def leer_session_request(sobre: Sobre) -> SolicitudSesion:
+    p = sobre.payload
+    return SolicitudSesion(
+        solicitud_id=_uuid(p, "request_id"),
+        desafio=_texto(p, "challenge"),
+    )
+
+
+@dataclass(frozen=True)
+class ConcesionSesion:
+    solicitud_id: UUID
+    firma: str
+
+
+def crear_session_grant(solicitud_id: UUID, firma: str) -> Sobre:
+    """El Nodo autoriza la sesión firmando el desafío."""
+    return Sobre(
+        tipo=TipoMensaje.SESSION_GRANT,
+        payload={"request_id": str(solicitud_id), "signature": firma},
+    )
+
+
+def leer_session_grant(sobre: Sobre) -> ConcesionSesion:
+    p = sobre.payload
+    return ConcesionSesion(
+        solicitud_id=_uuid(p, "request_id"),
+        firma=_texto(p, "signature"),
+    )

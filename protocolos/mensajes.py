@@ -61,10 +61,13 @@ class TipoMensaje:
     OBSERVATION = "observation"
     ACK = "ack"
     ERROR = "error"
+    SESSION_REQUEST = "session_request"
+    SESSION_GRANT = "session_grant"
 
     TODOS = frozenset({
         HELLO, CHALLENGE, WELCOME, REJECT,
         PRESENCE_MARK, OBSERVATION, ACK, ERROR,
+        SESSION_REQUEST, SESSION_GRANT,
     })
 
 

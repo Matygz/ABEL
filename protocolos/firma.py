@@ -119,3 +119,17 @@ def desde_texto(texto: str) -> bytes:
         return base64.b64decode(texto, validate=True)
     except (ValueError, TypeError):
         raise ErrorFirma("El valor no es base64 válido.") from None
+
+def material_sesion(desafio: bytes, solicitud_id: UUID, device_id: UUID) -> bytes:
+    """Material a firmar para autorizar una sesión de interfaz.
+
+    Prefijo distinto del de autenticación: una firma obtenida en el saludo
+    no debe servir para abrir una sesión web, ni al revés. Es la misma
+    separación de dominio de material_a_firmar, en otro contexto.
+    """
+    return (
+        b"ABEL-session-v1|"
+        + desafio
+        + b"|" + solicitud_id.bytes
+        + b"|" + device_id.bytes
+    )

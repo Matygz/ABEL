@@ -30,6 +30,8 @@ class ConfigEntorno:
     ws_puerto: int = 8765
     tls_cert: str = "certs/nucleo.crt"
     tls_clave: str = "certs/nucleo.key"
+    web_host: str = "127.0.0.1"
+    web_puerto: int = 8080
 
     @property
     def conninfo(self) -> str:
@@ -86,4 +88,6 @@ def cargar_config() -> ConfigEntorno:
         ws_puerto=int(os.getenv("ABEL_WS_PORT", "8765")),
         tls_cert=os.getenv("ABEL_TLS_CERT", "certs/nucleo.crt"),
         tls_clave=os.getenv("ABEL_TLS_KEY", "certs/nucleo.key"),
+        web_host=os.getenv("ABEL_WEB_HOST", "127.0.0.1"),
+        web_puerto=int(os.getenv("ABEL_WEB_PORT", "8080")),
     )

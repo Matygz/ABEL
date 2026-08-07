@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ABEL</title>
+<style>
+  :root {
+    --fondo: #0d1117;
+    --panel: #161b22;
+    --borde: #21262d;
+    --texto: #c9d1d9;
+    --tenue: #7d8590;
+    --acento: #58a6ff;
+    --vivo: #3fb950;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.5rem;
+    background: var(--fondo); color: var(--texto);
+    font: 15px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  main { max-width: 52rem; margin: 0 auto; }
+  h1 {
+    font-size: 1.1rem; font-weight: 500; letter-spacing: .25em;
+    margin: 0 0 .25rem; color: var(--acento);
+  }
+  .subtitulo { color: var(--tenue); font-size: .8rem; margin-bottom: 2rem; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--borde);
+    border-radius: 6px; padding: 1.25rem; margin-bottom: 1rem;
+  }
+  .panel h2 {
+    font-size: .75rem; font-weight: 500; letter-spacing: .15em;
+    text-transform: uppercase; color: var(--tenue);
+    margin: 0 0 1rem;
+  }
+  .fila {
+    display: flex; justify-content: space-between; gap: 1rem;
+    padding: .35rem 0; border-bottom: 1px solid var(--borde);
+  }
+  .fila:last-child { border-bottom: none; }
+  .fila .valor { color: var(--tenue); white-space: nowrap; }
+  .pulso {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--vivo); margin-right: .5rem; vertical-align: middle;
+  }
+  .pulso.apagado { background: var(--tenue); }
+  #eventos div { padding: .3rem 0; font-size: .85rem; }
+  #eventos .nuevo { color: var(--vivo); }
+  button {
+    background: var(--acento); color: var(--fondo); border: none;
+    border-radius: 5px; padding: .6rem 1.2rem; font: inherit;
+    font-weight: 600; cursor: pointer;
+  }
+  .error { color: #f85149; font-size: .85rem; margin-top: .75rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ABEL</h1>
+  <div class="subtitulo" id="subtitulo">estableciendo conexión…</div>
+
+  <div id="entrada" class="panel" hidden>
+    <h2>Sesión</h2>
+    <p style="margin:0 0 1rem; color:var(--tenue); font-size:.85rem">
+      El acceso se autoriza desde el Nodo de este dispositivo.
+      No hay contraseña.
+    </p>
+    <button onclick="abrirSesion()">Entrar</button>
+    <div class="error" id="error"></div>
+  </div>
+
+  <div id="contenido" hidden>
+    <div class="panel">
+      <h2><span class="pulso apagado" id="pulso"></span>Actividad de hoy</h2>
+      <div id="actividad"></div>
+    </div>
+
+    <div class="panel">
+      <h2>En vivo</h2>
+      <div id="eventos"><div style="color:var(--tenue)">esperando…</div></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+async function api(ruta, opciones) {
+  const r = await fetch(ruta, opciones);
+  return { ok: r.ok, datos: await r.json() };
+}
+
+function duracion(segundos) {
+  if (segundos < 60) return Math.round(segundos) + "s";
+  if (segundos < 3600) return (segundos / 60).toFixed(1) + "min";
+  return (segundos / 3600).toFixed(1) + "h";
+}
+
+async function abrirSesion() {
+  $("error").textContent = "";
+  const { ok, datos } = await api("/api/sesion/abrir", { method: "POST" });
+  if (ok) return iniciar();
+  $("error").textContent = datos.error || "No se pudo abrir la sesión.";
+}
+
+async function cargarActividad() {
+  const { ok, datos } = await api("/api/actividad");
+  if (!ok) return;
+
+  if (!datos.length) {
+    $("actividad").innerHTML =
+      '<div style="color:var(--tenue)">Sin actividad registrada hoy.</div>';
+    return;
+  }
+
+  $("actividad").innerHTML = datos.map(a => `
+    <div class="fila">
+      <span>${a.aplicacion}</span>
+      <span class="valor">${duracion(a.segundos)} · ${a.sesiones} sesiones</span>
+    </div>`).join("");
+}
+
+function conectarCanal() {
+  const esquema = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${esquema}://${location.host}/api/canal`);
+
+  ws.onopen = () => $("pulso").classList.remove("apagado");
+  ws.onclose = () => {
+    $("pulso").classList.add("apagado");
+    setTimeout(conectarCanal, 3000);
+  };
+
+  ws.onmessage = e => {
+    const aviso = JSON.parse(e.data);
+    const hora = new Date(aviso.momento).toLocaleTimeString("es-AR", { hour12: false });
+    const linea = document.createElement("div");
+    linea.className = "nuevo";
+    linea.textContent = `${hora}  ${aviso.tipo}`;
+    const lista = $("eventos");
+    if (lista.firstChild?.style) lista.innerHTML = "";
+    lista.prepend(linea);
+    while (lista.children.length > 12) lista.lastChild.remove();
+    setTimeout(() => linea.classList.remove("nuevo"), 1500);
+
+    if (aviso.tipo === "window_session") cargarActividad();
+  };
+}
+
+async function iniciar() {
+  const { datos } = await api("/api/sesion");
+
+  if (!datos.autenticado) {
+    $("subtitulo").textContent = "sin sesión";
+    $("entrada").hidden = false;
+    $("contenido").hidden = true;
+    return;
+  }
+
+  $("subtitulo").textContent =
+    `${datos.usuario} · ${datos.dispositivo} · v${datos.version}`;
+  $("entrada").hidden = true;
+  $("contenido").hidden = false;
+
+  await cargarActividad().catch(e => console.error("actividad:", e));
+  conectarCanal();
+}
+
+iniciar();
+</script>
+</main>
+</body>
+</html>

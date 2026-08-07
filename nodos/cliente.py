@@ -21,22 +21,27 @@ from websockets.asyncio.client import connect
 
 from nodos.cola import ColaObservaciones
 from nodos.config import ConfigNodo
+
 from protocolos.contenidos import (
     Observacion,
     Welcome,
     crear_hello,
     crear_observation,
+    crear_session_grant,
     leer_ack,
     leer_challenge,
+    leer_session_request,
     leer_welcome,
 )
+from protocolos.firma import (
+    a_texto, desde_texto, firmar, material_a_firmar, material_sesion
+)
+from protocolos.mensajes import ErrorProtocolo, TipoMensaje, deserializar
+
 from comun.planificador import Planificador, Tarea
 from nodos.sensores import RegistroSensores, crear_emisor
 from nodos.sensores_sistema import construir_sensores
 from nodos.sensores_ventana import construir_sensores_ventana
-
-from protocolos.firma import a_texto, desde_texto, firmar, material_a_firmar
-from protocolos.mensajes import ErrorProtocolo, TipoMensaje, deserializar
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,7 @@ class ClienteNodo:
         self._sesion: Welcome | None = None
         self._contexto_tls = self._construir_contexto_tls(config.certificado_nucleo)
         self._registro = RegistroSensores()
+        self._acks: asyncio.Queue = asyncio.Queue()
         for sensor in construir_sensores() + construir_sensores_ventana():
             self._registro.registrar(sensor)
         self._emitir = crear_emisor(self._cola)
@@ -111,14 +117,19 @@ class ClienteNodo:
             await asyncio.sleep(ESPERA_RECONEXION)
 
     async def _sesion_completa(self, ws) -> None:
-        """Saluda y mantiene la sesión: envía pendientes y marca presencia.
+        """Saluda y mantiene la sesión.
 
-        El envío corre más seguido que la presencia: los sensores encolan a su
-        propio ritmo y no tiene sentido que un dato espere un ciclo completo
-        de presencia para salir.
+        Dos cosas en paralelo: enviar lo que haya en cola, y atender lo que
+        el Núcleo envíe por su cuenta.
         """
         await self._saludar(ws)
 
+        await asyncio.gather(
+            self._bucle_de_envio(ws),
+            self._bucle_de_escucha(ws),
+        )
+
+    async def _bucle_de_envio(self, ws) -> None:
         segundos_desde_presencia = 0.0
         intervalo_envio = 2.0
 
@@ -131,6 +142,22 @@ class ClienteNodo:
 
             await self._dormir(intervalo_envio)
             segundos_desde_presencia += intervalo_envio
+
+    async def _bucle_de_escucha(self, ws) -> None:
+        """Atiende mensajes que el Núcleo envía sin que se los pidan."""
+        async for crudo in ws:
+            try:
+                sobre = deserializar(crudo)
+            except ErrorProtocolo as exc:
+                logger.warning("Mensaje inválido del Núcleo: %s", exc.detalle)
+                continue
+
+            if sobre.tipo == TipoMensaje.SESSION_REQUEST:
+                await self._atender_solicitud_sesion(ws, sobre)
+            elif sobre.tipo == TipoMensaje.ACK:
+                self._acks.put_nowait(sobre)
+            else:
+                logger.debug("Mensaje no esperado del Núcleo: %s", sobre.tipo)
 
     async def _dormir(self, segundos: float) -> None:
         """Duerme en tramos cortos para que Ctrl+C se atienda rápido en Windows."""
@@ -196,14 +223,15 @@ class ClienteNodo:
             lote = self._cola.pendientes(self._sesion.max_batch_size)
             if not lote:
                 return
-
             await ws.send(crear_observation(lote).serializar())
-            sobre = deserializar(await ws.recv())
-
+            try:
+                sobre = await asyncio.wait_for(self._acks.get(), timeout=30.0)
+            except TimeoutError:
+                logger.warning("Sin ack en 30s. Se reintenta en el próximo ciclo.")
+                return
             if sobre.tipo != TipoMensaje.ACK:
                 logger.warning("Se esperaba ack, llegó %s. Se reintenta.", sobre.tipo)
                 return
-
             ack = leer_ack(sobre)
             self._cola.confirmar(list(ack.acknowledged))
             self._cola.descartar([i for i, _ in ack.rejected])
@@ -259,3 +287,23 @@ class ClienteNodo:
     async def ejecutar_sensores(self) -> None:
         """Corre el planificador de sensores. Independiente de la conexión."""
         await self._planificador.iniciar()
+
+    async def _atender_solicitud_sesion(self, ws, sobre) -> None:
+        """Firma un desafío para autorizar una sesión de interfaz.
+
+        El Nodo no decide si la sesión es legítima: eso lo evaluó el Núcleo.
+        Solo prueba que la solicitud llegó a este dispositivo, que es lo
+        único que puede probar.
+        """
+        solicitud = leer_session_request(sobre)
+        material = material_sesion(
+            desde_texto(solicitud.desafio),
+            solicitud.solicitud_id,
+            self._config.device_id,
+        )
+        firma = firmar(self._config.clave_privada, material)
+
+        await ws.send(
+            crear_session_grant(solicitud.solicitud_id, a_texto(firma)).serializar()
+        )
+        logger.info("Sesión de interfaz autorizada desde este dispositivo.")
