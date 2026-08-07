@@ -25,6 +25,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 
+from comun.eventos import BusEventos
 from nucleo.config import ConfigEntorno
 from comun.errores import ErrorOperativo
 
@@ -40,8 +41,9 @@ class ErrorRepositorio(ErrorOperativo):
 class Repositorio:
     """Acceso asíncrono a la base de datos de ABEL."""
 
-    def __init__(self, config: ConfigEntorno) -> None:
-        self._conninfo = config.conninfo
+    def __init__(self, config: ConfigEntorno, bus: "BusEventos | None" = None) -> None:
+        self._config = config
+        self._bus = bus
 
     @asynccontextmanager
     async def _conexion(self) -> AsyncIterator[psycopg.AsyncConnection]:
@@ -140,7 +142,17 @@ class Repositorio:
         """Registra un evento. Devuelve su id."""
         if occurred_at is None:
             occurred_at = datetime.now(timezone.utc)
-
+            
+        if self._bus is not None:
+            from comun.eventos import Aviso
+            self._bus.publicar(
+                Aviso(
+                    tipo_evento=event_type,
+                    actor_id=actor_id,
+                    occurred_at=occurred_at or datetime.now(timezone.utc),
+                    resumen=payload or {},
+                )
+            )
         async with self._conexion() as conn:
             cur = await conn.execute(
                 """
@@ -160,6 +172,7 @@ class Repositorio:
             fila = await cur.fetchone()
 
         return fila["id"]
+        
     # ------------------------------------------------------------------
     # Usuarios
     # ------------------------------------------------------------------
