@@ -17,6 +17,8 @@ from comun.eventos import BusEventos
 from nucleo.memoria.consultas import Memoria
 from nucleo.web.servidor import ServidorWeb
 from nucleo.web.sesiones import ServicioSesiones
+from nucleo.lenguaje.motor import MotorLenguaje
+from nucleo.lenguaje.servidor_modelo import ServidorModelo
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +72,21 @@ async def main() -> None:
             puerto=config.web_puerto,
         )
         planificador.registrar_servicio("servidor_web", servidor_web.ejecutar)
+        motor = MotorLenguaje(f"http://127.0.0.1:{config.llm_puerto}")
+        modelo = ServidorModelo(
+            ejecutable=config.llm_ejecutable,
+            modelo=config.llm_modelo,
+            motor=motor,
+            puerto=config.llm_puerto,
+            inactividad_segundos=config.llm_inactividad_segundos,
+        )
+        planificador.registrar_servicio("vigilante_modelo", modelo.vigilar)
 
         _instalar_senales(planificador, ciclo)
-        await planificador.iniciar()
-
+        try:
+            await planificador.iniciar()
+        finally:
+            await modelo.cerrar()
 def _instalar_senales(planificador: Planificador, ciclo: CicloVida) -> None:
     """Hace que Ctrl+C solicite una detención ordenada."""
 

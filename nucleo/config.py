@@ -32,6 +32,10 @@ class ConfigEntorno:
     tls_clave: str = "certs/nucleo.key"
     web_host: str = "127.0.0.1"
     web_puerto: int = 8080
+    llm_ejecutable: str = ""
+    llm_modelo: str = ""
+    llm_puerto: int = 8090
+    llm_inactividad_segundos: float = 900.0
 
     @property
     def conninfo(self) -> str:
@@ -90,4 +94,8 @@ def cargar_config() -> ConfigEntorno:
         tls_clave=os.getenv("ABEL_TLS_KEY", "certs/nucleo.key"),
         web_host=os.getenv("ABEL_WEB_HOST", "127.0.0.1"),
         web_puerto=int(os.getenv("ABEL_WEB_PORT", "8080")),
+        llm_ejecutable=os.getenv("ABEL_LLM_EXE", ""),
+        llm_modelo=os.getenv("ABEL_LLM_MODEL", ""),
+        llm_puerto=int(os.getenv("ABEL_LLM_PORT", "8090")),
+        llm_inactividad_segundos=float(os.getenv("ABEL_LLM_IDLE", "900")),
     )
