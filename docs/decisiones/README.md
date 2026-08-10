@@ -49,3 +49,9 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0025 | Manejo de ruido en sensores | Vigente | 3.2 |
 | 0026 | Registro de títulos de ventana | Vigente | 3.2 |
 | 0027 | Módulo de memoria | Vigente | 3.3 |
+| 0028 | Memoria global con atribución | Vigente | 4 |
+| 0029 | Sesión de interfaz sin contraseña | Vigente | 4.1 |
+| 0030 | Criterio de permisos: conocimiento sí, alcance no | Vigente | 4 |
+| 0031 | Identificar no es autenticar | Vigente | 4 |
+| 0032 | Alcance: ABEL asume acceso exclusivo | Vigente | 4 |
+| 0033 | Bus de eventos interno | Vigente | 4.1 |
