@@ -6,169 +6,559 @@
 <title>ABEL</title>
 <style>
   :root {
-    --fondo: #0d1117;
-    --panel: #161b22;
-    --borde: #21262d;
-    --texto: #c9d1d9;
-    --tenue: #7d8590;
-    --acento: #58a6ff;
-    --vivo: #3fb950;
+    --vacio: #05070a;
+    --tenue: #4a5560;
+    --texto: #b8c4d0;
+    --frio: #4fd1e0;
+    --calido: #e8b04f;
+    --alerta: #e05f5f;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 2rem 1.5rem;
-    background: var(--fondo); color: var(--texto);
-    font: 15px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%; overflow: hidden;
+    background: var(--vacio); color: var(--texto);
+    font: 13px/1.7 ui-monospace, "Cascadia Code", Consolas, monospace;
+    letter-spacing: .02em;
   }
-  main { max-width: 52rem; margin: 0 auto; }
-  h1 {
-    font-size: 1.1rem; font-weight: 500; letter-spacing: .25em;
-    margin: 0 0 .25rem; color: var(--acento);
+
+  #escena { position: fixed; inset: 0; opacity: 0; transition: opacity 1.2s; }
+  #escena.visible { opacity: 1; }
+
+  /* --- Marcas mínimas en las esquinas ------------------------------ */
+
+  .marca {
+    position: fixed; font-size: 10px; letter-spacing: .2em;
+    color: var(--tenue); text-transform: uppercase;
+    pointer-events: none; user-select: none;
+    transition: opacity .8s;
   }
-  .subtitulo { color: var(--tenue); font-size: .8rem; margin-bottom: 2rem; }
+  #identidad { top: 1.75rem; left: 2rem; }
+  #pulso-info { bottom: 1.75rem; left: 2rem; }
+  #hora { bottom: 1.75rem; right: 2rem; }
+
+  /* --- Invocador --------------------------------------------------- */
+
+  #invocador {
+    position: fixed; top: 1.5rem; right: 2rem;
+    display: flex; gap: .6rem;
+    opacity: .25; transition: opacity .5s;
+  }
+  #invocador:hover { opacity: 1; }
+
+  #invocador button {
+    background: none; border: 1px solid var(--tenue);
+    color: var(--tenue); font: inherit; font-size: 10px;
+    letter-spacing: .15em; text-transform: uppercase;
+    padding: .4rem .9rem; border-radius: 2px; cursor: pointer;
+    transition: all .25s;
+  }
+  #invocador button:hover {
+    border-color: var(--frio); color: var(--frio);
+  }
+
+  /* --- Paneles emergentes ------------------------------------------ */
+
+  #paneles {
+    position: fixed; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(5, 7, 10, .55);
+    backdrop-filter: blur(3px);
+  }
+  #paneles.visible { display: flex; }
+
   .panel {
-    background: var(--panel); border: 1px solid var(--borde);
-    border-radius: 6px; padding: 1.25rem; margin-bottom: 1rem;
+    width: min(38rem, 90vw); max-height: 78vh;
+    background: rgba(9, 12, 17, .94);
+    border: 1px solid rgba(74, 85, 96, .35);
+    border-radius: 3px; padding: 1.75rem 2rem;
+    overflow-y: auto;
+    animation: emerger .3s cubic-bezier(.16,1,.3,1);
   }
+  @keyframes emerger {
+    from { opacity: 0; transform: translateY(8px) scale(.99); }
+  }
+
   .panel h2 {
-    font-size: .75rem; font-weight: 500; letter-spacing: .15em;
+    font-size: 10px; font-weight: 400; letter-spacing: .25em;
     text-transform: uppercase; color: var(--tenue);
-    margin: 0 0 1rem;
+    margin-bottom: 1.5rem;
+    display: flex; justify-content: space-between;
   }
+  .panel h2 button {
+    background: none; border: none; color: var(--tenue);
+    font: inherit; cursor: pointer; letter-spacing: .1em;
+  }
+  .panel h2 button:hover { color: var(--texto); }
+
   .fila {
-    display: flex; justify-content: space-between; gap: 1rem;
-    padding: .35rem 0; border-bottom: 1px solid var(--borde);
+    display: flex; justify-content: space-between; gap: 1.5rem;
+    padding: .5rem 0;
+    border-bottom: 1px solid rgba(74, 85, 96, .12);
   }
   .fila:last-child { border-bottom: none; }
-  .fila .valor { color: var(--tenue); white-space: nowrap; }
-  .pulso {
-    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    background: var(--vivo); margin-right: .5rem; vertical-align: middle;
+  .fila .dato { color: var(--tenue); white-space: nowrap; font-size: 12px; }
+  .fila .titulo {
+    color: var(--tenue); font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .pulso.apagado { background: var(--tenue); }
-  #eventos div { padding: .3rem 0; font-size: .85rem; }
-  #eventos .nuevo { color: var(--vivo); }
-  button {
-    background: var(--acento); color: var(--fondo); border: none;
-    border-radius: 5px; padding: .6rem 1.2rem; font: inherit;
-    font-weight: 600; cursor: pointer;
+
+  .vacio-mensaje {
+    color: var(--tenue); font-size: 12px; padding: 1rem 0;
   }
-  .error { color: #f85149; font-size: .85rem; margin-top: .75rem; }
+
+  /* --- Rastro de eventos ------------------------------------------- */
+
+  #rastro {
+    position: fixed; top: 50%; right: 2rem;
+    transform: translateY(-50%);
+    text-align: right; pointer-events: none;
+    font-size: 10px; letter-spacing: .1em;
+  }
+  #rastro div {
+    color: var(--tenue); opacity: 0;
+    animation: aparecer 6s forwards;
+  }
+  @keyframes aparecer {
+    10% { opacity: .8; }
+    70% { opacity: .25; }
+    100% { opacity: 0; }
+  }
+
+  /* --- Entrada ------------------------------------------------------ */
+
+  #entrada {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 2rem;
+  }
+  #entrada.oculto { display: none; }
+  #entrada p {
+    color: var(--tenue); font-size: 11px; letter-spacing: .15em;
+    text-align: center; max-width: 24rem; line-height: 2;
+  }
+  #entrada button {
+    background: none; border: 1px solid var(--frio); color: var(--frio);
+    font: inherit; font-size: 11px; letter-spacing: .25em;
+    text-transform: uppercase; padding: .7rem 2.5rem;
+    border-radius: 2px; cursor: pointer; transition: all .3s;
+  }
+  #entrada button:hover {
+    background: rgba(79, 209, 224, .08);
+  }
+  #error { color: var(--alerta); font-size: 11px; min-height: 1.5em; }
+  #secciones {
+    display: flex; gap: 1.5rem; margin-bottom: 1.5rem;
+    padding-bottom: .75rem;
+    border-bottom: 1px solid rgba(74, 85, 96, .2);
+  }
+  #secciones button {
+    background: none; border: none; color: var(--tenue);
+    font: inherit; font-size: 10px; letter-spacing: .15em;
+    text-transform: uppercase; cursor: pointer; padding: 0;
+    transition: color .2s;
+  }
+  #secciones button:hover { color: var(--texto); }
+  #secciones button.activa { color: var(--frio); }
+  
 </style>
 </head>
 <body>
-<main>
-  <h1>ABEL</h1>
-  <div class="subtitulo" id="subtitulo">estableciendo conexión…</div>
 
-  <div id="entrada" class="panel" hidden>
-    <h2>Sesión</h2>
-    <p style="margin:0 0 1rem; color:var(--tenue); font-size:.85rem">
-      El acceso se autoriza desde el Nodo de este dispositivo.
-      No hay contraseña.
-    </p>
-    <button onclick="abrirSesion()">Entrar</button>
-    <div class="error" id="error"></div>
+<canvas id="escena"></canvas>
+
+<div id="entrada">
+  <p>El acceso se autoriza desde el Nodo de este dispositivo</p>
+  <button onclick="abrirSesion()">Entrar</button>
+  <div id="error"></div>
+</div>
+
+<div id="marcas" hidden>
+  <div class="marca" id="identidad"></div>
+  <div class="marca" id="pulso-info">—</div>
+  <div class="marca" id="hora"></div>
+
+  <div id="invocador">
+    <button onclick="abrirPanel('personal')">Personal</button>
+    <button onclick="abrirPanel('admin')" id="boton-admin" hidden>Admin</button>
   </div>
 
-  <div id="contenido" hidden>
-    <div class="panel">
-      <h2><span class="pulso apagado" id="pulso"></span>Actividad de hoy</h2>
-      <div id="actividad"></div>
-    </div>
+  <div id="rastro"></div>
+</div>
 
-    <div class="panel">
-      <h2>En vivo</h2>
-      <div id="eventos"><div style="color:var(--tenue)">esperando…</div></div>
-    </div>
+<div id="paneles" onclick="if(event.target===this) cerrar()">
+  <div class="panel">
+    <h2>
+      <span id="panel-titulo"></span>
+      <button onclick="cerrar()">cerrar</button>
+    </h2>
+    <nav id="secciones"></nav>
+    <div id="panel-cuerpo"></div>
   </div>
-</main>
+</div>
 
-<script>
+<script type="importmap">
+{ "imports": { "three": "/lib/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+/* ==================================================================
+   La forma
+   ================================================================== */
+
+const lienzo = document.getElementById("escena");
+const escena = new THREE.Scene();
+escena.fog = new THREE.FogExp2(0x05070a, 0.11);
+
+const camara = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+camara.position.z = 7.2;
+
+const render = new THREE.WebGLRenderer({
+  canvas: lienzo, antialias: true, alpha: true,
+});
+render.setPixelRatio(Math.min(devicePixelRatio, 2));
+render.setSize(innerWidth, innerHeight);
+
+// El núcleo: icosaedro geodésico. Subdivisión 2 en vez de 3 — con 3 la
+// malla se vuelve tan densa que se lee como esfera y pierde la geometría.
+const nucleo = new THREE.Group();
+escena.add(nucleo);
+
+const geometria = new THREE.IcosahedronGeometry(1.55, 2);
+
+const aristas = new THREE.LineSegments(
+  new THREE.EdgesGeometry(geometria, 1),
+  new THREE.LineBasicMaterial({
+    color: 0x4fd1e0, transparent: true, opacity: 0.5,
+  })
+);
+nucleo.add(aristas);
+
+// Una segunda capa apenas mayor, más tenue: da profundidad sin bloom.
+const halo = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.62, 2), 1),
+  new THREE.LineBasicMaterial({
+    color: 0x4fd1e0, transparent: true, opacity: 0.09,
+  })
+);
+nucleo.add(halo);
+
+// Vértices como puntos: la estructura se lee incluso cuando las
+// aristas se atenúan.
+const vertices = new THREE.Points(
+  new THREE.IcosahedronGeometry(1.55, 2),
+  new THREE.PointsMaterial({
+    color: 0x9fe8f0, size: 0.035, transparent: true, opacity: 0.7,
+  })
+);
+nucleo.add(vertices);
+
+// Polvo alrededor. Muy poco y muy tenue: sugiere espacio, no lo llena.
+const cantidadPolvo = 400;
+const posiciones = new Float32Array(cantidadPolvo * 3);
+for (let i = 0; i < cantidadPolvo; i++) {
+  const radio = 3 + Math.random() * 7;
+  const theta = Math.random() * Math.PI * 2;
+  const phi = Math.acos(2 * Math.random() - 1);
+  posiciones[i * 3]     = radio * Math.sin(phi) * Math.cos(theta);
+  posiciones[i * 3 + 1] = radio * Math.sin(phi) * Math.sin(theta);
+  posiciones[i * 3 + 2] = radio * Math.cos(phi);
+}
+const geometriaPolvo = new THREE.BufferGeometry();
+geometriaPolvo.setAttribute("position", new THREE.BufferAttribute(posiciones, 3));
+const polvo = new THREE.Points(
+  geometriaPolvo,
+  new THREE.PointsMaterial({
+    color: 0x4a5560, size: 0.022, transparent: true, opacity: 0.5,
+  })
+);
+escena.add(polvo);
+
+/* ==================================================================
+   El comportamiento
+   ------------------------------------------------------------------
+   La forma no gira porque sí: reacciona. Se orienta hacia el cursor
+   con retraso — atención, no seguimiento. Late con la presencia.
+   Se sacude cuando llega un evento.
+   ================================================================== */
+
+const atencion = { x: 0, y: 0, objetivoX: 0, objetivoY: 0 };
+const estado = {
+  latido: 0,          // decae desde 1 tras cada marca de presencia
+  sobresalto: 0,      // decae desde 1 tras cada evento
+  quietud: 0,         // crece cuando no pasa nada
+  activo: true,
+};
+
+addEventListener("pointermove", e => {
+  // Rango limitado: mira, no persigue.
+  atencion.objetivoX = ((e.clientY / innerHeight) - 0.5) * 0.5;
+  atencion.objetivoY = ((e.clientX / innerWidth) - 0.5) * 0.9;
+  estado.quietud = 0;
+});
+
+addEventListener("resize", () => {
+  camara.aspect = innerWidth / innerHeight;
+  camara.updateProjectionMatrix();
+  render.setSize(innerWidth, innerHeight);
+});
+
+export function latir() { estado.latido = 1; }
+export function sobresaltar() { estado.sobresalto = 1; }
+
+const reloj = new THREE.Clock();
+
+function animar() {
+  requestAnimationFrame(animar);
+  const t = reloj.getElapsedTime();
+  const dt = Math.min(reloj.getDelta(), 0.1);
+
+  // Orientación: sigue al cursor con inercia. El 0.045 es lo que hace
+  // que se sienta pesado y deliberado en vez de reactivo.
+  atencion.x += (atencion.objetivoX - atencion.x) * 0.045;
+  atencion.y += (atencion.objetivoY - atencion.y) * 0.045;
+
+  estado.quietud += dt;
+  estado.latido = Math.max(0, estado.latido - dt * 0.6);
+  estado.sobresalto = Math.max(0, estado.sobresalto - dt * 2.2);
+
+  // Deriva lenta cuando nadie mira. No es rotación constante: es
+  // aburrimiento — aparece recién después de unos segundos quieto.
+  const deriva = Math.min(estado.quietud - 4, 8) * 0.012;
+  const vagar = deriva > 0 ? deriva : 0;
+
+  nucleo.rotation.x = atencion.x + Math.sin(t * 0.11) * 0.12 * (1 + vagar);
+  nucleo.rotation.y = atencion.y + t * 0.035 * (0.3 + vagar);
+  nucleo.rotation.z = Math.sin(t * 0.07) * 0.05;
+
+  // Respiración de fondo, más el latido de la presencia.
+  const respirar = 1 + Math.sin(t * 0.55) * 0.012;
+  const pulsar = 1 + estado.latido * estado.latido * 0.09;
+  const temblar = 1 + estado.sobresalto * 0.035;
+  nucleo.scale.setScalar(respirar * pulsar * temblar);
+
+  // La intensidad sigue al estado: apagado cuando no hay nadie,
+  // encendido cuando algo ocurre.
+  const base = estado.activo ? 0.5 : 0.22;
+  aristas.material.opacity = base + estado.latido * 0.3 + estado.sobresalto * 0.35;
+  vertices.material.opacity = 0.7 + estado.sobresalto * 0.3;
+  halo.material.opacity = 0.09 + estado.latido * 0.12;
+
+  polvo.rotation.y = t * 0.006;
+  polvo.rotation.x = t * 0.003;
+
+  render.render(escena, camara);
+}
+animar();
+
+/* ==================================================================
+   Conexión con ABEL
+   ================================================================== */
+
 const $ = id => document.getElementById(id);
 
 async function api(ruta, opciones) {
   const r = await fetch(ruta, opciones);
-  return { ok: r.ok, datos: await r.json() };
+  return { ok: r.ok, datos: r.ok ? await r.json() : null };
 }
 
-function duracion(segundos) {
-  if (segundos < 60) return Math.round(segundos) + "s";
-  if (segundos < 3600) return (segundos / 60).toFixed(1) + "min";
-  return (segundos / 3600).toFixed(1) + "h";
+function duracion(s) {
+  if (s < 60) return Math.round(s) + "s";
+  if (s < 3600) return (s / 60).toFixed(1) + "min";
+  return (s / 3600).toFixed(1) + "h";
 }
 
-async function abrirSesion() {
+function horaDe(iso) {
+  return new Date(iso).toLocaleTimeString("es-AR", {
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+}
+
+window.abrirSesion = async function () {
   $("error").textContent = "";
-  const { ok, datos } = await api("/api/sesion/abrir", { method: "POST" });
-  if (ok) return iniciar();
+  const r = await fetch("/api/sesion/abrir", { method: "POST" });
+  if (r.ok) return iniciar();
+  const datos = await r.json().catch(() => ({}));
   $("error").textContent = datos.error || "No se pudo abrir la sesión.";
-}
+};
 
-async function cargarActividad() {
-  const { ok, datos } = await api("/api/actividad");
-  if (!ok) return;
+/* --- Paneles ------------------------------------------------------ */
 
-  if (!datos.length) {
-    $("actividad").innerHTML =
-      '<div style="color:var(--tenue)">Sin actividad registrada hoy.</div>';
-    return;
-  }
+const vistas = {
+  actividad: {
+    nombre: "Actividad",
+    ruta: "/api/actividad",
+    dibujar: datos => datos.length
+      ? datos.map(a => `
+          <div class="fila">
+            <span>${a.aplicacion}</span>
+            <span class="dato">${duracion(a.segundos)} · ${a.sesiones}</span>
+          </div>`).join("")
+      : '<div class="vacio-mensaje">Nada registrado todavía.</div>',
+  },
+  registro: {
+    nombre: "Registro",
+    ruta: "/api/sesiones-ventana?limite=40",
+    dibujar: datos => datos.length
+      ? datos.map(s => `
+          <div class="fila">
+            <span class="titulo">${s.titulo || s.aplicacion}</span>
+            <span class="dato">${horaDe(s.momento)} · ${duracion(s.segundos)}</span>
+          </div>`).join("")
+      : '<div class="vacio-mensaje">Sin registro.</div>',
+  },
+  presencia: {
+    nombre: "Presencia",
+    ruta: "/api/presencia?dias=2",
+    dibujar: datos => datos.length
+      ? datos.map(p => `
+          <div class="fila">
+            <span>${p.estado === "active" ? "activo" : "inactivo"}</span>
+            <span class="dato">${horaDe(p.momento)} · ${p.dispositivo}</span>
+          </div>`).join("")
+      : '<div class="vacio-mensaje">Sin cambios registrados.</div>',
+  },
+  sistema: {
+    nombre: "Sistema",
+    ruta: "/api/estado",
+    dibujar: datos => `
+      <div class="fila">
+        <span>Eventos en memoria</span>
+        <span class="dato">${datos.total_eventos}</span>
+      </div>
+      ${datos.dispositivos.map(d => `
+        <div class="fila">
+          <span>${d.nombre}</span>
+          <span class="dato">${d.confianza} · ${d.ultima_senal ? horaDe(d.ultima_senal) : "nunca"}</span>
+        </div>`).join("")}`,
+  },
+  memoria: {
+    nombre: "Memoria",
+    ruta: "/api/estado",
+    dibujar: datos => datos.eventos.map(e => `
+      <div class="fila">
+        <span class="titulo">${e.tipo}</span>
+        <span class="dato">${e.cantidad}</span>
+      </div>`).join(""),
+  },
+};
 
-  $("actividad").innerHTML = datos.map(a => `
-    <div class="fila">
-      <span>${a.aplicacion}</span>
-      <span class="valor">${duracion(a.segundos)} · ${a.sesiones} sesiones</span>
-    </div>`).join("");
+// Qué secciones tiene cada panel. El de admin exige rol y dispositivo
+// admin; el servidor lo verifica igual, esto solo evita mostrar lo que
+// no se puede usar.
+const paneles = {
+  personal: { titulo: "Personal", vistas: ["actividad", "registro", "presencia"] },
+  admin:    { titulo: "Administración", vistas: ["sistema", "memoria"] },
+};
+
+let panelActual = null;
+
+window.abrirPanel = function (clave) {
+  panelActual = paneles[clave];
+  $("panel-titulo").textContent = panelActual.titulo;
+
+  $("secciones").innerHTML = panelActual.vistas.map((v, i) => `
+    <button onclick="verSeccion('${v}', this)" class="${i === 0 ? 'activa' : ''}">
+      ${vistas[v].nombre}
+    </button>`).join("");
+
+  $("paneles").classList.add("visible");
+  verSeccion(panelActual.vistas[0], $("secciones").firstElementChild);
+};
+
+window.verSeccion = async function (clave, boton) {
+  const vista = vistas[clave];
+
+  document.querySelectorAll("#secciones button")
+    .forEach(b => b.classList.toggle("activa", b === boton));
+
+  $("panel-cuerpo").innerHTML = '<div class="vacio-mensaje">…</div>';
+
+  const { ok, datos } = await api(vista.ruta);
+  $("panel-cuerpo").innerHTML = ok
+    ? vista.dibujar(datos)
+    : '<div class="vacio-mensaje">No disponible.</div>';
+};
+
+window.cerrar = () => $("paneles").classList.remove("visible");
+
+addEventListener("keydown", e => {
+  if (e.key === "Escape") cerrar();
+});
+
+/* --- Canal en vivo ------------------------------------------------ */
+
+function anotar(texto) {
+  const linea = document.createElement("div");
+  linea.textContent = texto;
+  $("rastro").prepend(linea);
+  setTimeout(() => linea.remove(), 6000);
+  while ($("rastro").children.length > 5) $("rastro").lastChild.remove();
 }
 
 function conectarCanal() {
   const esquema = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${esquema}://${location.host}/api/canal`);
 
-  ws.onopen = () => $("pulso").classList.remove("apagado");
+  ws.onopen = () => { estado.activo = true; };
   ws.onclose = () => {
-    $("pulso").classList.add("apagado");
+    estado.activo = false;
+    $("pulso-info").textContent = "sin señal";
     setTimeout(conectarCanal, 3000);
   };
 
   ws.onmessage = e => {
     const aviso = JSON.parse(e.data);
-    const hora = new Date(aviso.momento).toLocaleTimeString("es-AR", { hour12: false });
-    const linea = document.createElement("div");
-    linea.className = "nuevo";
-    linea.textContent = `${hora}  ${aviso.tipo}`;
-    const lista = $("eventos");
-    if (lista.firstChild?.style) lista.innerHTML = "";
-    lista.prepend(linea);
-    while (lista.children.length > 12) lista.lastChild.remove();
-    setTimeout(() => linea.classList.remove("nuevo"), 1500);
 
-    if (aviso.tipo === "window_session") cargarActividad();
+    if (aviso.tipo === "presence_mark") {
+      latir();
+      $("pulso-info").textContent = `pulso ${horaDe(aviso.momento)}`;
+    } else {
+      sobresaltar();
+      anotar(aviso.tipo.replace(/_/g, " "));
+    }
+
+    if (aviso.tipo === "session_state") {
+      estado.activo = aviso.resumen?.state === "active";
+    }
   };
+}
+
+/* --- Arranque ----------------------------------------------------- */
+
+function actualizarHora() {
+  $("hora").textContent = new Date().toLocaleTimeString("es-AR", {
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
 }
 
 async function iniciar() {
   const { datos } = await api("/api/sesion");
 
-  if (!datos.autenticado) {
-    $("subtitulo").textContent = "sin sesión";
-    $("entrada").hidden = false;
-    $("contenido").hidden = true;
+  if (!datos?.autenticado) {
+    $("entrada").classList.remove("oculto");
+    $("marcas").hidden = true;
+    lienzo.classList.remove("visible");
     return;
   }
 
-  $("subtitulo").textContent =
-    `${datos.usuario} · ${datos.dispositivo} · v${datos.version}`;
-  $("entrada").hidden = true;
-  $("contenido").hidden = false;
-
-  await cargarActividad().catch(e => console.error("actividad:", e));
+  $("entrada").classList.add("oculto");
+  $("marcas").hidden = false;
+  lienzo.classList.add("visible");
+  $("identidad").textContent = `${datos.usuario} · ${datos.dispositivo}`;
+  $("identidad").textContent = `${datos.usuario} · ${datos.dispositivo}`;
+  $("boton-admin").hidden =
+    !(datos.rol === "admin" && datos.confianza === "admin");
+  actualizarHora();
+  setInterval(actualizarHora, 20000);
   conectarCanal();
 }
 
 iniciar();
 </script>
-</main>
+
 </body>
 </html>
