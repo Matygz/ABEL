@@ -55,3 +55,8 @@ Registro de decisiones cuya justificación no se deduce leyendo el código.
 | 0031 | Identificar no es autenticar | Vigente | 4 |
 | 0032 | Alcance: ABEL asume acceso exclusivo | Vigente | 4 |
 | 0033 | Bus de eventos interno | Vigente | 4.1 |
+| 0034 | El modelo de lenguaje como órgano, no como identidad | Vigente | 5 |
+| 0035 | Despacho por tipo de problema | Vigente | 5.2 |
+| 0036 | Criterio de habla | Vigente | 5.4 |
+| 0037 | La conversación es memoria | Vigente | 5.5 |
+| 0038 | ABEL corre en background, no como servicio | Vigente | 5.6 |
