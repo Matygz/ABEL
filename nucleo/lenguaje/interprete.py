@@ -110,6 +110,11 @@ Mensaje: "si tiro 3 dados, ¿cuál es la probabilidad de sacar más de 15?"
   "parametros": {{"clase": "probabilidad",
   "enunciado": "si tiro 3 dados, ¿cuál es la probabilidad de sacar más de 15?"}}}}],
   "ambiguedades": []}}
+
+Mensaje: "¿cuánto es 4 x 29?"
+{{"intenciones": [{{"tipo": "calcular", "confianza": 0.95,
+  "parametros": {{"clase": "aritmetica", "enunciado": "4 x 29"}}}}],
+  "ambiguedades": []}}
   
 Mensaje: "¿cuánto estuve en Code hoy?"
 {{"intenciones": [{{"tipo": "consultar_memoria", "confianza": 0.95,

@@ -761,12 +761,13 @@ class Repositorio:
         )
 
     async def ultimos_turnos(
-        self, user_id: UUID, cantidad: int = 8
+        self, user_id: UUID, cantidad: int = 8, minutos: int = 45
     ) -> list[dict[str, Any]]:
-        """Devuelve los últimos turnos de conversación, del más viejo al más nuevo.
+        """Devuelve los últimos turnos, del más viejo al más nuevo.
 
-        Se consulta por el usuario, no por el actor de cada turno: una
-        conversación incluye lo que dijo ABEL y lo que dijo la persona.
+        Solo los de la sesión de conversación en curso: un intercambio de hace
+        horas no es contexto, es otra conversación. Un saludo repetido en el
+        mismo minuto es raro; repetido al otro día es lo normal.
         """
         async with self._conexion() as conn:
             cur = await conn.execute(
@@ -776,12 +777,12 @@ class Repositorio:
                        payload->>'text' AS texto
                   FROM events
                  WHERE event_type = 'utterance'
-                   AND (actor_id = %s
-                        OR payload->>'addressee' = %s)
+                   AND occurred_at > now() - (%s * INTERVAL '1 minute')
+                   AND (actor_id = %s OR payload->>'addressee' = %s)
                  ORDER BY occurred_at DESC
                  LIMIT %s
                 """,
-                (user_id, str(user_id), cantidad),
+                (minutos, user_id, str(user_id), cantidad),
             )
             filas = await cur.fetchall()
 

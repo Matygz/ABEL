@@ -185,11 +185,13 @@ class Expresador:
             return self._formatear_actividad(d)
 
         if resultado.tipo == "calculo":
+            if "valor" in d:
+                return f"{d['expresion']} = {d['valor']}"
             return (
                 f"la probabilidad es {d['porcentaje']:.2f}% "
                 f"({d['favorables']:,} casos favorables de {d['total']:,})"
             )
-
+        
         if resultado.tipo == "presencia":
             cambios = d.get("cambios", [])
             if not cambios:

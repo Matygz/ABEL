@@ -97,6 +97,9 @@ class MotorCalculo:
         if not enunciado:
             return sin_alcance("un enunciado claro para calcular")
 
+        if clase in ("aritmetica", "aritmética"):
+            return await self._resolver_aritmetica(enunciado)
+
         if clase != "probabilidad":
             return sin_alcance(f"resolver problemas de tipo {clase!r}")
 
@@ -198,4 +201,50 @@ class MotorCalculo:
                 f"{float(exacta) * 100:.2f}%",
             ),
             salvedades=tuple(salvedades),
+        )
+    
+    async def _resolver_aritmetica(self, enunciado: str) -> Resultado:
+        """Evalúa una expresión aritmética de forma exacta.
+
+        Los modelos de lenguaje son pésimos con aritmética: producen números
+        plausibles y equivocados. Acá se calcula de verdad.
+        """
+        import ast
+        import operator
+
+        OPERADORES = {
+            ast.Add: operator.add, ast.Sub: operator.sub,
+            ast.Mult: operator.mul, ast.Div: operator.truediv,
+            ast.Pow: operator.pow, ast.Mod: operator.mod,
+            ast.USub: operator.neg,
+        }
+
+        def evaluar(nodo):
+            if isinstance(nodo, ast.Constant) and isinstance(nodo.value, (int, float)):
+                return nodo.value
+            if isinstance(nodo, ast.BinOp) and type(nodo.op) in OPERADORES:
+                return OPERADORES[type(nodo.op)](
+                    evaluar(nodo.left), evaluar(nodo.right)
+                )
+            if isinstance(nodo, ast.UnaryOp) and type(nodo.op) in OPERADORES:
+                return OPERADORES[type(nodo.op)](evaluar(nodo.operand))
+            raise ValueError("expresión no permitida")
+
+        expresion = (
+            enunciado.lower()
+            .replace("x", "*").replace("×", "*").replace("÷", "/")
+            .replace(",", ".")
+        )
+
+        try:
+            arbol = ast.parse(expresion, mode="eval")
+            valor = evaluar(arbol.body)
+        except (SyntaxError, ValueError, TypeError, ZeroDivisionError):
+            return sin_alcance(f"entender {enunciado!r} como una operación")
+
+        return Resultado(
+            tipo="calculo",
+            procedencia=Procedencia.CALCULADO,
+            datos={"expresion": expresion, "valor": valor},
+            pasos=(f"{expresion} = {valor}",),
         )
