@@ -371,14 +371,53 @@ function texturaPunto() {
 const PUNTO = texturaPunto();
 // Vértices como puntos: la estructura se lee incluso cuando las
 // aristas se atenúan.
-const vertices = new THREE.Points(
-  new THREE.IcosahedronGeometry(1.55, 2),
-  new THREE.PointsMaterial({
-    color: 0x9fe8f0, size: 0.08, transparent: true, opacity: 0.8,
-    map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
-  })
+// Vértices como esferas reales. Los Points con textura dependen de cómo el
+// navegador resuelve el sprite; una geometría instanciada es predecible.
+const posVertices = new THREE.IcosahedronGeometry(1.55, 2)
+  .getAttribute("position");
+
+const esfera = new THREE.SphereGeometry(0.008, 8, 8);
+const materialVertice = new THREE.MeshBasicMaterial({
+  color: 0x9fe8f0, transparent: true, opacity: 0.65,
+});
+
+const vertices = new THREE.InstancedMesh(
+  esfera, materialVertice, posVertices.count
 );
+
+const auxiliar = new THREE.Object3D();
+for (let i = 0; i < posVertices.count; i++) {
+  auxiliar.position.set(
+    posVertices.getX(i), posVertices.getY(i), posVertices.getZ(i)
+  );
+  auxiliar.updateMatrix();
+  vertices.setMatrixAt(i, auxiliar.matrix);
+}
+vertices.instanceMatrix.needsUpdate = true;
 nucleo.add(vertices);
+
+// Halo de los vértices: una segunda capa más grande y tenue. Sumada por
+// AdditiveBlending da el resplandor sin el costo del post-procesado.
+// Halo de los vértices: esferas mayores y tenues, sumadas por
+// AdditiveBlending. Da el resplandor sin post-procesado.
+const auraVertices = new THREE.InstancedMesh(
+  new THREE.SphereGeometry(0.009, 8, 8),
+  new THREE.MeshBasicMaterial({
+    color: 0x4fd1e0, transparent: true, opacity: 0.05,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  }),
+  posVertices.count
+);
+
+for (let i = 0; i < posVertices.count; i++) {
+  auxiliar.position.set(
+    posVertices.getX(i), posVertices.getY(i), posVertices.getZ(i)
+  );
+  auxiliar.updateMatrix();
+  auraVertices.setMatrixAt(i, auxiliar.matrix);
+}
+auraVertices.instanceMatrix.needsUpdate = true;
+nucleo.add(auraVertices);
 
 // Polvo alrededor. Muy poco y muy tenue: sugiere espacio, no lo llena.
 const cantidadPolvo = 400;
@@ -396,11 +435,19 @@ geometriaPolvo.setAttribute("position", new THREE.BufferAttribute(posiciones, 3)
 const polvo = new THREE.Points(
   geometriaPolvo,
   new THREE.PointsMaterial({
-    color: 0x6b7a8a, size: 0.06, transparent: true, opacity: 0.6,
+    color: 0x6b7a8a, size: 0.07, transparent: true, opacity: 0.75,
     map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
   })
 );
 escena.add(polvo);
+const auraPolvo = new THREE.Points(
+  geometriaPolvo,
+  new THREE.PointsMaterial({
+    color: 0x4fd1e0, size: 0.13, transparent: true, opacity: 0.18,
+    map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
+  })
+);
+escena.add(auraPolvo);
 
 /* ==================================================================
    El comportamiento
@@ -487,7 +534,8 @@ function animar() {
 
   polvo.rotation.y = t * 0.006;
   polvo.rotation.x = t * 0.003;
-
+  auraPolvo.rotation.copy(polvo.rotation);
+  auraVertices.material.opacity = 0.28 + estado.latido * 0.25 + estado.sobresalto * 0.3;
   render.render(escena, camara);
 }
 animar();
