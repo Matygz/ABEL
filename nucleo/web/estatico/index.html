@@ -353,12 +353,29 @@ const halo = new THREE.LineSegments(
 );
 nucleo.add(halo);
 
+// Textura circular para los puntos: PointsMaterial dibuja cuadrados por
+// defecto, y a este tamaño se nota.
+function texturaPunto() {
+  const lienzo = document.createElement("canvas");
+  lienzo.width = lienzo.height = 64;
+  const ctx = lienzo.getContext("2d");
+  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0,   "rgba(255,255,255,1)");
+  grad.addColorStop(0.4, "rgba(255,255,255,.6)");
+  grad.addColorStop(1,   "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 64, 64);
+  return new THREE.CanvasTexture(lienzo);
+}
+
+const PUNTO = texturaPunto();
 // Vértices como puntos: la estructura se lee incluso cuando las
 // aristas se atenúan.
 const vertices = new THREE.Points(
   new THREE.IcosahedronGeometry(1.55, 2),
   new THREE.PointsMaterial({
-    color: 0x9fe8f0, size: 0.035, transparent: true, opacity: 0.7,
+    color: 0x9fe8f0, size: 0.08, transparent: true, opacity: 0.8,
+    map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
   })
 );
 nucleo.add(vertices);
@@ -379,7 +396,8 @@ geometriaPolvo.setAttribute("position", new THREE.BufferAttribute(posiciones, 3)
 const polvo = new THREE.Points(
   geometriaPolvo,
   new THREE.PointsMaterial({
-    color: 0x4a5560, size: 0.022, transparent: true, opacity: 0.5,
+    color: 0x6b7a8a, size: 0.06, transparent: true, opacity: 0.6,
+    map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
   })
 );
 escena.add(polvo);

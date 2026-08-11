@@ -25,7 +25,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 RAIZ = Path(__file__).parent
-PYTHON = RAIZ / ".venv" / "Scripts" / "pythonw.exe"
+PYTHON = RAIZ / ".venv" / "Scripts" / "python.exe"
 URL_INTERFAZ = "http://127.0.0.1:8080"
 
 SIN_VENTANA = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -37,7 +37,7 @@ class Abel:
     def __init__(self) -> None:
         self._nucleo: subprocess.Popen[bytes] | None = None
         self._nodo: subprocess.Popen[bytes] | None = None
-        self._icono: pystray.Icon | None = None
+        self._icono = None  # type: ignore[assignment]
         self._detener = threading.Event()
 
     # ------------------------------------------------------------------
