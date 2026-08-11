@@ -167,8 +167,22 @@ class MotorLenguaje:
             temperatura=temperatura, formato_json=True,
         )
 
+        texto = respuesta.texto.strip()
+
+        # Algunos modelos envuelven el JSON en un bloque de markdown aunque
+        # se les pida JSON puro. Se limpia antes de parsear.
+        if texto.startswith("```"):
+            lineas = texto.split("\n")
+            lineas = lineas[1:]                      # quita ```json
+            if lineas and lineas[-1].strip() == "```":
+                lineas = lineas[:-1]
+            texto = "\n".join(lineas).strip()
+
         try:
-            datos = json.loads(respuesta.texto)
+            datos = json.loads(texto)
+        except json.JSONDecodeError:
+            logger.warning("El modelo no devolvió JSON: %r", texto[:200])
+            raise ErrorLenguaje("El modelo no devolvió JSON válido.") from None
         except json.JSONDecodeError:
             logger.warning("El modelo no devolvió JSON: %r", respuesta.texto[:200])
             raise ErrorLenguaje("El modelo no devolvió JSON válido.") from None

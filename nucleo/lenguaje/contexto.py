@@ -64,6 +64,14 @@ class ContextoABEL:
             "ABEL NO registra todavía: ubicación, personas, lugares, "
             "calendario, correo, ni contenido de archivos."
         )
+        lineas.append(
+            "ABEL NO registra todavía: ubicación, personas, lugares, "
+            "calendario, correo, ni contenido de archivos."
+        )
+        lineas.append(
+            "ABEL SÍ resuelve cálculos de probabilidad, lógica y optimización "
+            "con motores propios: eso nunca es fuera_de_alcance."
+        )
 
         return "\n".join(lineas)
 

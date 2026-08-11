@@ -80,9 +80,10 @@ NO respondas al usuario. NO inventes datos. NO resuelvas nada.
 
 {contexto}
 
-REGLA CRÍTICA: si el usuario pide algo que ABEL no registra o no puede hacer,
-el tipo es "fuera_de_alcance". NO fuerces el mensaje para que encaje en otro
-tipo. Es mejor admitir que no aplica que devolver una interpretación falsa.
+REGLA CRÍTICA: si el usuario pide datos que ABEL no registra (ubicación,
+personas, mensajes) o acciones que no puede hacer, el tipo es
+"fuera_de_alcance". Pero un problema de cálculo NUNCA es fuera_de_alcance:
+ABEL tiene motores propios para resolverlos.
 
 Tipos:
 
@@ -104,6 +105,12 @@ Tipos:
 
 EJEMPLOS:
 
+Mensaje: "si tiro 3 dados, ¿cuál es la probabilidad de sacar más de 15?"
+{{"intenciones": [{{"tipo": "calcular", "confianza": 0.95,
+  "parametros": {{"clase": "probabilidad",
+  "enunciado": "si tiro 3 dados, ¿cuál es la probabilidad de sacar más de 15?"}}}}],
+  "ambiguedades": []}}
+  
 Mensaje: "¿cuánto estuve en Code hoy?"
 {{"intenciones": [{{"tipo": "consultar_memoria", "confianza": 0.95,
   "parametros": {{"metrica": "tiempo_por_aplicacion", "rango": "hoy",

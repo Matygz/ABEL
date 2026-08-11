@@ -43,7 +43,7 @@ class ServidorModelo:
         self._capas_gpu = capas_gpu
         self._contexto = contexto
         self._inactividad = inactividad_segundos
-
+        
         self._proceso: subprocess.Popen | None = None
         self._ultimo_uso: float = 0.0
         self._arrancando = asyncio.Lock()
@@ -70,6 +70,24 @@ class ServidorModelo:
     def _marcar_uso(self) -> None:
         self._ultimo_uso = asyncio.get_running_loop().time()
 
+    def _matar_huerfanos(self) -> None:
+        """Termina servidores del modelo que hayan quedado de antes."""
+        nombre = self._ejecutable.stem
+        try:
+            import psutil
+        except ImportError:
+            return
+
+        for proceso in psutil.process_iter(["name", "pid"]):
+            try:
+                if proceso.info["name"] == f"{nombre}.exe":
+                    logger.warning(
+                        "Se encontró un servidor del modelo huérfano (pid %d). "
+                        "Se termina.", proceso.info["pid"]
+                    )
+                    proceso.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
     # ------------------------------------------------------------------
 
     async def _arrancar(self) -> None:
@@ -79,6 +97,11 @@ class ServidorModelo:
 
         logger.info("Cargando el modelo %s...", self._modelo.name)
 
+        # Puede haber quedado un servidor de una ejecución anterior que no
+        # cerró bien: dos procesos compitiendo por la misma VRAM degradan
+        # el rendimiento de forma dramática y silenciosa.
+        self._matar_huerfanos()
+
         self._proceso = subprocess.Popen(
             [
                 str(self._ejecutable),
@@ -86,6 +109,9 @@ class ServidorModelo:
                 "--port", str(self._puerto),
                 "--gpu-layers", str(self._capas_gpu),
                 "--ctx-size", str(self._contexto),
+                "-ngl", str(self._capas_gpu),
+                "-c", str(self._contexto),
+                "-np", "1",
                 "--log-disable",
             ],
             stdout=subprocess.DEVNULL,
