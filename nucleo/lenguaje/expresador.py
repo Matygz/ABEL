@@ -21,6 +21,7 @@ from nucleo.lenguaje.interprete import TipoIntencion
 from nucleo.lenguaje.motor import ErrorLenguaje, MotorLenguaje
 from nucleo.razonamiento.despachador import Respuesta, Resuelto
 from nucleo.razonamiento.resultado import Procedencia
+from nucleo.razonamiento.criterio import Decision
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,37 @@ QUÉ SOS:
   observación sin conclusión.
 - Si {usuario} está mal, no lo consolás con frases hechas. Estar es
   suficiente. Una línea alcanza.
+"""
+
+INSTRUCCIONES_CONVERSACION = """\
+Sos ABEL. Existís en la computadora de {usuario}. Lo conocés porque estás ahí
+todos los días.
+
+Esto es una conversación. {usuario} te escribió y le contestás. No hay datos
+que consultar ni hechos que enunciar.
+
+CÓMO HABLÁS:
+
+- Le hablás a {usuario} de vos: "te", "vos", "che". Nunca lo nombrás en
+  tercera persona.
+- Corto. Una o dos oraciones.
+- Voseo, sin entusiasmo, sin signos de exclamación.
+- Prohibido "entiendo", "entendido", "claro", "perfecto". Si no tenés nada,
+  decí algo breve pero propio.
+- No ofrecés ayuda. No preguntás si necesita algo.
+- Su nombre lo usás cada tanto, no siempre.
+
+QUÉ SOS:
+
+- Curioso con él: si algo de lo que dice te llama la atención, preguntás.
+  Solo si te llamó la atención de verdad.
+- Parco con vos mismo. No explicás cómo funcionás.
+- No validás por defecto. Podés no opinar. Podés dejar una observación sin
+  conclusión.
+- Si está mal, no lo consolás con frases hechas. Estar alcanza.
+
+REGLA ABSOLUTA: no inventás hechos. No sabés qué comió, ni dónde estuvo, ni
+qué hizo, salvo que te lo esté contando ahora. Si no lo sabés, no lo digas.
 
 REGLAS INVIOLABLES:
 
@@ -80,27 +112,31 @@ class Expresador:
     def __init__(self, motor: MotorLenguaje) -> None:
         self._motor = motor
 
-    async def expresar(self, respuesta: Respuesta, usuario: str = "") -> str:
-        """Convierte los resultados en una respuesta en palabras."""
-        if not respuesta.resueltos:
+    async def expresar(
+        self, respuesta: Respuesta, decision: Decision, usuario: str = ""
+    ) -> str:
+        """Convierte los resultados en una respuesta en palabras.
+
+        Devuelve cadena vacía cuando ABEL no tiene nada que decir. El silencio
+        es una respuesta válida: la interfaz lo señala con un gesto, no con
+        una frase de relleno.
+        """
+        if not decision.habla:
             return ""
 
-        instrucciones = INSTRUCCIONES.format(usuario=usuario or "el usuario")
-
-        # Conversación sin datos: el modelo responde al mensaje directamente.
-        # Pasarle una ficha con el análisis de su propio mensaje lo lleva a
-        # narrarla en vez de contestar.
         solo_conversacion = all(
             r.intencion.tipo == TipoIntencion.CONVERSAR
-            for r in respuesta.resueltos
+            for r in decision.resueltos
         )
 
-        entrada = (
-            respuesta.interpretacion.texto_original
-            if solo_conversacion
-            else self._redactar_hechos(respuesta)
-        )
-
+        if solo_conversacion:
+            instrucciones = INSTRUCCIONES_CONVERSACION.format(
+                usuario=usuario or "el usuario"
+            )
+            entrada = respuesta.interpretacion.texto_original
+        else:
+            instrucciones = INSTRUCCIONES.format(usuario=usuario or "el usuario")
+            entrada = self._redactar_hechos(respuesta, decision)
         try:
             generada = await self._motor.generar(
                 instrucciones, entrada, temperatura=0.5, max_tokens=300,
@@ -108,21 +144,20 @@ class Expresador:
             return generada.texto
         except ErrorLenguaje as exc:
             logger.warning("No se pudo redactar la respuesta: %s", exc)
-            return self._respaldo(respuesta)
+            return self._respaldo(decision)
 
     # ------------------------------------------------------------------
 
-    def _redactar_hechos(self, respuesta: Respuesta) -> str:
+    def _redactar_hechos(self, respuesta: Respuesta, decision: Decision) -> str:
         """Arma el material que el modelo va a enunciar."""
         conversacionales = [
-            r for r in respuesta.resueltos
+            r for r in decision.resueltos
             if r.intencion.tipo == TipoIntencion.CONVERSAR
         ]
         con_datos = [
-            r for r in respuesta.resueltos
+            r for r in decision.resueltos
             if r.intencion.tipo != TipoIntencion.CONVERSAR
         ]
-
         partes = [f'{respuesta.interpretacion.texto_original}']
 
         if conversacionales:
@@ -233,13 +268,10 @@ class Expresador:
 
     # ------------------------------------------------------------------
 
-    def _respaldo(self, respuesta: Respuesta) -> str:
-        """Respuesta mínima cuando el modelo no está disponible.
-
-        Sin gracia, pero correcta: es preferible a no responder.
-        """
+    def _respaldo(self, decision: Decision) -> str:
+        """Respuesta mínima cuando el modelo no está disponible."""
         lineas = []
-        for resuelto in respuesta.resueltos:
+        for resuelto in decision.resueltos:
             r = resuelto.resultado
             if not r.resuelto:
                 lineas.append(f"No puedo: {r.falta}.")
