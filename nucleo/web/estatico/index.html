@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ABEL</title>
@@ -108,6 +109,17 @@
     color: var(--tenue); font-size: 12px; padding: 1rem 0;
   }
 
+  #invocar-chat {
+    position: fixed; bottom: 1.75rem; left: 50%;
+    transform: translateX(-50%);
+    background: none; border: 1px solid var(--tenue);
+    color: var(--tenue); font: inherit; font-size: 10px;
+    letter-spacing: .2em; text-transform: uppercase;
+    padding: .5rem 1.4rem; border-radius: 2px; cursor: pointer;
+    opacity: .3; transition: all .35s;
+  }
+  #invocar-chat:hover { opacity: 1; border-color: var(--frio); color: var(--frio); }
+  #invocar-chat.oculto { opacity: 0; pointer-events: none; }
   /* --- Rastro de eventos ------------------------------------------- */
 
   #rastro {
@@ -161,7 +173,95 @@
   }
   #secciones button:hover { color: var(--texto); }
   #secciones button.activa { color: var(--frio); }
-  
+
+  /* --- Conversación ------------------------------------------------ */
+
+  #chat {
+    position: fixed; bottom: 0; left: 50%;
+    transform: translateX(-50%) translateY(100%);
+    width: min(42rem, 92vw);
+    margin-bottom: 1.5rem;
+    padding: 1.25rem 1.5rem;
+    background: rgba(9, 12, 17, .92);
+    border: 1px solid rgba(74, 85, 96, .3);
+    border-radius: 4px;
+    backdrop-filter: blur(6px);
+    display: flex; flex-direction: column; gap: .9rem;
+    opacity: 0; pointer-events: none;
+    transition: transform .45s cubic-bezier(.16,1,.3,1), opacity .35s;
+  }
+  #chat.abierto {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1; pointer-events: auto;
+  }
+
+  #conversacion {
+    display: flex; flex-direction: column; gap: .6rem;
+    max-height: 40vh; overflow-y: auto;
+    scrollbar-width: none;
+    padding-top: 3rem;
+    /* Los mensajes se desvanecen hacia arriba. Vuelven al hacer scroll:
+       la máscara es fija respecto del contenedor, no del contenido. */
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      rgba(0, 0, 0, .15) 2rem,
+      rgba(0, 0, 0, .6) 3.5rem,
+      #000 5rem
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      rgba(0, 0, 0, .15) 2rem,
+      rgba(0, 0, 0, .6) 3.5rem,
+      #000 5rem
+    );
+  }
+  #conversacion::-webkit-scrollbar { display: none; }
+
+ .dicho {
+    font-size: 13px; line-height: 1.7;
+    padding-left: 1.3rem;
+    position: relative;
+    animation: emerger .4s cubic-bezier(.16,1,.3,1);
+  }
+  .dicho.abel::before {
+    content: "";
+    position: absolute; left: 0; top: .35em;
+    width: 11px; height: 11px;
+    background-image: url("/favicon.svg");
+    background-size: contain;
+    background-repeat: no-repeat;
+    opacity: .8;
+  }
+  .dicho.propio { color: var(--tenue); }
+  .dicho.abel { color: var(--texto); }
+  .dicho.silencio {
+    color: var(--tenue); font-size: 11px;
+    letter-spacing: .15em; opacity: .5;
+  }
+
+  #entrada-chat {
+    border-top: 1px solid rgba(74, 85, 96, .25);
+    padding-top: .9rem;
+  }
+  #mensaje {
+    width: 100%; background: none; border: none;
+    color: var(--texto); font: inherit; font-size: 13px;
+    outline: none; padding: 0;
+  }
+  #mensaje::placeholder { color: rgba(74, 85, 96, .5); }
+  #mensaje:disabled { opacity: .4; }
+
+  .pensando {
+    display: inline-block; width: 5px; height: 5px;
+    border-radius: 50%; background: var(--frio);
+    animation: latir 1.2s ease-in-out infinite;
+  }
+  @keyframes latir {
+    0%, 100% { opacity: .2; transform: scale(.8); }
+    50%      { opacity: 1;  transform: scale(1.2); }
+  }
 </style>
 </head>
 <body>
@@ -178,6 +278,13 @@
   <div class="marca" id="identidad"></div>
   <div class="marca" id="pulso-info">—</div>
   <div class="marca" id="hora"></div>
+  <button id="invocar-chat" onclick="alternarChat()">Hablar</button>
+  <div id="chat">
+    <div id="conversacion"></div>
+    <div id="entrada-chat">
+      <input type="text" id="mensaje" placeholder="" autocomplete="off">
+    </div>
+  </div>
 
   <div id="invocador">
     <button onclick="abrirPanel('personal')">Personal</button>
@@ -306,8 +413,16 @@ addEventListener("resize", () => {
   render.setSize(innerWidth, innerHeight);
 });
 
-export function latir() { estado.latido = 1; }
-export function sobresaltar() { estado.sobresalto = 1; }
+function latir() { estado.latido = 1; }
+function sobresaltar() { estado.sobresalto = 1; }
+let atendiendo = false;
+
+function atender() {
+  atendiendo = true;
+  setTimeout(() => { atendiendo = false; }, 30000);
+}
+
+function terminar() { atendiendo = false; }
 
 const reloj = new THREE.Clock();
 
@@ -338,7 +453,12 @@ function animar() {
   const respirar = 1 + Math.sin(t * 0.55) * 0.012;
   const pulsar = 1 + estado.latido * estado.latido * 0.09;
   const temblar = 1 + estado.sobresalto * 0.035;
-  nucleo.scale.setScalar(respirar * pulsar * temblar);
+  // Mientras procesa, la forma se contrae y late más rápido: la espera se
+  // ve en ABEL, no en un cartel.
+  const procesando = atendiendo
+    ? 0.94 + Math.sin(t * 4.5) * 0.025
+    : 1;
+  nucleo.scale.setScalar(respirar * pulsar * temblar * procesando);
 
   // La intensidad sigue al estado: apagado cuando no hay nadie,
   // encendido cuando algo ocurre.
@@ -486,7 +606,13 @@ window.verSeccion = async function (clave, boton) {
 window.cerrar = () => $("paneles").classList.remove("visible");
 
 addEventListener("keydown", e => {
-  if (e.key === "Escape") cerrar();
+  if (e.key !== "Escape") return;
+
+  if ($("paneles").classList.contains("visible")) {
+    cerrar();
+  } else if ($("chat").classList.contains("abierto")) {
+    alternarChat();
+  }
 });
 
 /* --- Canal en vivo ------------------------------------------------ */
@@ -513,10 +639,11 @@ function conectarCanal() {
   ws.onmessage = e => {
     const aviso = JSON.parse(e.data);
 
-    if (aviso.tipo === "presence_mark") {
+   if (aviso.tipo === "presence_mark") {
       latir();
       $("pulso-info").textContent = `pulso ${horaDe(aviso.momento)}`;
-    } else {
+    } else if (aviso.tipo !== "utterance") {
+      // Los turnos de conversación ya se ven en el chat.
       sobresaltar();
       anotar(aviso.tipo.replace(/_/g, " "));
     }
@@ -534,6 +661,82 @@ function actualizarHora() {
     hour: "2-digit", minute: "2-digit", hour12: false,
   });
 }
+
+/* --- Conversación ------------------------------------------------- */
+
+function decir(texto, clase) {
+  const linea = document.createElement("div");
+  linea.className = `dicho ${clase}`;
+  linea.textContent = texto;
+  $("conversacion").append(linea);
+  $("conversacion").scrollTop = $("conversacion").scrollHeight;
+  return linea;
+}
+
+window.alternarChat = function () {
+  const chat = $("chat");
+  const abierto = chat.classList.toggle("abierto");
+  $("invocar-chat").classList.toggle("oculto", abierto);
+  if (abierto) $("mensaje").focus();
+  else $("mensaje").blur();
+};
+
+async function enviar(texto) {
+  decir(texto, "propio");
+
+  const campo = $("mensaje");
+  campo.value = "";
+  campo.disabled = true;
+
+  // La forma se agita mientras piensa: la espera se ve en ABEL, no en
+  // un cartel de "escribiendo...".
+  const marca = decir("", "dicho");
+  marca.innerHTML = '<span class="pensando"></span>';
+  atender();
+
+  try {
+    const r = await fetch("/api/conversar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mensaje: texto }),
+    });
+
+    const datos = await r.json();
+    marca.remove();
+
+    if (!r.ok) {
+      decir(
+        datos.error === "lenguaje_no_disponible"
+          ? "sin lenguaje disponible"
+          : "algo falló",
+        "silencio"
+      );
+      return;
+    }
+
+    if (datos.habla) {
+      decir(datos.texto, "abel");
+    } else {
+      // ABEL registró el mensaje y no tiene nada que decir. Se marca con
+      // un gesto, no con una frase de relleno.
+      decir("· · ·", "silencio");
+      sobresaltar();
+    }
+  } catch (e) {
+    marca.remove();
+    decir("sin conexión", "silencio");
+  } finally {
+    terminar();
+    campo.disabled = false;
+    campo.focus();
+  }
+}
+
+$("mensaje").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  const texto = e.target.value.trim();
+  if (texto) enviar(texto);
+});
 
 async function iniciar() {
   const { datos } = await api("/api/sesion");

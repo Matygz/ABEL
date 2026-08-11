@@ -44,11 +44,18 @@ class Decision:
 class Criterio:
     """Filtra lo que ABEL va a decir."""
 
-    def decidir(self, respuesta: Respuesta) -> Decision:
+    def decidir(self, respuesta: Respuesta, previos: list | None = None) -> Decision:
         if not respuesta.resueltos:
             return Decision(Postura.CALLAR, motivo="nada que resolver")
 
+        if self._ya_lo_dijo(respuesta, previos):
+            return Decision(
+                Postura.ACUSAR,
+                motivo="ya dijo lo mismo y ya le contesté",
+            )
+
         relevantes = self._filtrar(respuesta)
+        ...
 
         if not relevantes:
             return Decision(
@@ -81,7 +88,27 @@ class Criterio:
             return (sin_alcance[0],)
 
         return tuple(r for r in candidatos if self._aporta(r))
+    @staticmethod
+    def _ya_lo_dijo(respuesta: Respuesta, previos: list | None) -> bool:
+        """Si el mensaje repite algo reciente al pie de la letra.
 
+        Contestar lo mismo dos veces es de máquina. Alguien que repite un
+        saludo en el mismo minuto está haciendo otra cosa que saludar.
+        """
+        if not previos:
+            return False
+
+        actual = respuesta.interpretacion.texto_original.strip().lower()
+        if not actual:
+            return False
+
+        dichos = [
+            (t.get("texto") or "").strip().lower()
+            for t in previos[-6:]
+            if t.get("hablante") != "abel"
+        ]
+        return actual in dichos
+    
     @staticmethod
     def _desahogo(candidatos: list[Resuelto]) -> Resuelto | None:
         """El desahogo tiene prioridad sobre cualquier dato."""

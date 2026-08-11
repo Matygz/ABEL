@@ -19,6 +19,14 @@ from nucleo.web.servidor import ServidorWeb
 from nucleo.web.sesiones import ServicioSesiones
 from nucleo.lenguaje.motor import MotorLenguaje
 from nucleo.lenguaje.servidor_modelo import ServidorModelo
+from nucleo.lenguaje.contexto import ProveedorContexto
+from nucleo.lenguaje.conversacion import Conversacion
+from nucleo.lenguaje.expresador import Expresador
+from nucleo.lenguaje.interprete import Interprete
+from nucleo.razonamiento.criterio import Criterio
+from nucleo.razonamiento.despachador import Despachador
+from nucleo.razonamiento.motor_calculo import MotorCalculo
+from nucleo.razonamiento.motor_memoria import MotorMemoria
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +70,7 @@ async def main() -> None:
             tls_clave=config.tls_clave,
         )
         planificador.registrar_servicio("servidor_nodos", servidor.ejecutar)
-        servidor_web = ServidorWeb(
-            repositorio=repositorio,
-            memoria=Memoria(repositorio),
-            sesiones=ServicioSesiones(repositorio, servidor),
-            bus=bus,
-            version=VERSION,
-            host=config.web_host,
-            puerto=config.web_puerto,
-        )
-        planificador.registrar_servicio("servidor_web", servidor_web.ejecutar)
+
         motor = MotorLenguaje(f"http://127.0.0.1:{config.llm_puerto}")
         modelo = ServidorModelo(
             ejecutable=config.llm_ejecutable,
@@ -82,11 +81,45 @@ async def main() -> None:
         )
         planificador.registrar_servicio("vigilante_modelo", modelo.vigilar)
 
+        memoria = Memoria(repositorio)
+
+        conversacion = None
+        if config.llm_ejecutable and config.llm_modelo:
+            conversacion = Conversacion(
+                repositorio=repositorio,
+                modelo=modelo,
+                contexto=ProveedorContexto(repositorio),
+                interprete=Interprete(motor),
+                despachador=Despachador(
+                    MotorMemoria(memoria), MotorCalculo(motor)
+                ),
+                criterio=Criterio(),
+                expresador=Expresador(motor),
+            )
+        else:
+            logger.warning(
+                "Sin modelo de lenguaje configurado. La conversación no estará "
+                "disponible."
+            )
+
+        servidor_web = ServidorWeb(
+            repositorio=repositorio,
+            memoria=memoria,
+            sesiones=ServicioSesiones(repositorio, servidor),
+            bus=bus,
+            version=VERSION,
+            host=config.web_host,
+            puerto=config.web_puerto,
+            conversacion=conversacion,
+        )
+        planificador.registrar_servicio("servidor_web", servidor_web.ejecutar)
+
         _instalar_senales(planificador, ciclo)
         try:
             await planificador.iniciar()
         finally:
             await modelo.cerrar()
+        
 def _instalar_senales(planificador: Planificador, ciclo: CicloVida) -> None:
     """Hace que Ctrl+C solicite una detención ordenada."""
 

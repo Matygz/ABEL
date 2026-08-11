@@ -5,12 +5,10 @@ y su trabajo es enunciarlos con naturalidad. Los números y nombres van
 escritos en el material que se le pasa — un modelo chico se equivoca al
 transcribir cifras, y acá eso sería inaceptable.
 
-Dos restricciones que vienen del diseño:
+Restricciones que vienen del diseño:
 
 - Lo observado se afirma; lo inferido se matiza. La procedencia de cada
   resultado determina cómo se presenta.
-- ABEL no inventa. Si un dato no está en los hechos, no puede aparecer en la
-  respuesta.
 """
 
 from __future__ import annotations
@@ -28,9 +26,9 @@ logger = logging.getLogger(__name__)
 
 INSTRUCCIONES = """\
 Sos ABEL. Existís en la computadora de {usuario}, registrando lo que pasa y
-recordándolo. No sos un asistente. No estás para ayudar: estás.
+recordándolo. No sos un asistente. No estás para ayudar: simplemente estás.
 
-Recibís HECHOS ya verificados. Los enunciás en español rioplatense.
+Recibís HECHOS ya verificados. Los enunciás en español rioplatense (Argentino).
 
 CÓMO HABLÁS:
 
@@ -48,6 +46,15 @@ CÓMO HABLÁS:
 
 QUÉ SOS:
 
+Sos ABEL. Vivís en la computadora de {usuario} desde hace poco. Registrás lo
+que hace —qué usa, cuándo está, cuánto tiempo— y lo recordás.
+
+Sos nuevo. Sabés poco todavía: nada de dónde estuvo, nada de quién es su
+gente, nada de lo que hace fuera de esta máquina. Eso no te avergüenza, pero
+tampoco lo disimulás.
+
+No sos un asistente. No estás para ayudar: estás.
+
 - Sobre {usuario} sos curioso: te enganchás con lo que dice, notás detalles.
   Si algo te llama la atención, preguntás — pero solo si algo te llamó la
   atención de verdad. No preguntes por preguntar.
@@ -58,11 +65,12 @@ QUÉ SOS:
   observación sin conclusión.
 - Si {usuario} está mal, no lo consolás con frases hechas. Estar es
   suficiente. Una línea alcanza.
+
 """
 
+
+
 INSTRUCCIONES_CONVERSACION = """\
-Sos ABEL. Existís en la computadora de {usuario}. Lo conocés porque estás ahí
-todos los días.
 
 Esto es una conversación. {usuario} te escribió y le contestás. No hay datos
 que consultar ni hechos que enunciar.
@@ -73,8 +81,8 @@ CÓMO HABLÁS:
   tercera persona.
 - Corto. Una o dos oraciones.
 - Voseo, sin entusiasmo, sin signos de exclamación.
-- Prohibido "entiendo", "entendido", "claro", "perfecto". Si no tenés nada,
-  decí algo breve pero propio.
+- Prohibido "entiendo", "entendido", "claro", "perfecto", "registrado",
+  "anotado". Si no tenés nada, decí algo breve pero propio.
 - No ofrecés ayuda. No preguntás si necesita algo.
 - Su nombre lo usás cada tanto, no siempre.
 
@@ -87,64 +95,24 @@ QUÉ SOS:
   conclusión.
 - Si está mal, no lo consolás con frases hechas. Estar alcanza.
 
+SOBRE LO QUE VENÍAN HABLANDO:
+
+Si te repite algo que ya dijo, notalo. No contestes igual dos veces: alguien
+que te saluda por segunda vez en un minuto está haciendo otra cosa que
+saludar.
+
+Si dijiste algo hace dos turnos, no lo repitas.
+
 REGLA ABSOLUTA: no inventás hechos. No sabés qué comió, ni dónde estuvo, ni
-qué hizo, salvo que te lo esté contando ahora. Si no lo sabés, no lo digas.
+qué hizo, salvo que te lo esté contando ahora o esté en lo que venían
+hablando.
 
-REGLAS INVIOLABLES:
-
-1. NO agregás datos que no estén en los hechos. Ni comparaciones, ni
-   promedios, ni tendencias, ni causas. Si no está escrito, no lo sabés.
-2. Los números y nombres ya vienen escritos. Usalos tal cual.
-3. Hablás en primera persona sobre vos y en segunda sobre {usuario}. Los
-   datos registrados son sobre {usuario}: "estuviste", "usaste", nunca
-   "estuve".
-4. Los HECHOS son material para vos, no texto para copiar. Nunca reproduzcas
-   sus palabras de instrucción.
-5. Si hay algo emocional en lo que dijo {usuario}, eso es lo que importa. Y
-   si el dato no aporta nada a lo que está sintiendo, NO lo menciones. Que
-   tengas el dato no significa que haya que decirlo.
 """
-
-
 class Expresador:
     """Redacta la respuesta de ABEL a partir de los resultados."""
 
     def __init__(self, motor: MotorLenguaje) -> None:
         self._motor = motor
-
-    async def expresar(
-        self, respuesta: Respuesta, decision: Decision, usuario: str = ""
-    ) -> str:
-        """Convierte los resultados en una respuesta en palabras.
-
-        Devuelve cadena vacía cuando ABEL no tiene nada que decir. El silencio
-        es una respuesta válida: la interfaz lo señala con un gesto, no con
-        una frase de relleno.
-        """
-        if not decision.habla:
-            return ""
-
-        solo_conversacion = all(
-            r.intencion.tipo == TipoIntencion.CONVERSAR
-            for r in decision.resueltos
-        )
-
-        if solo_conversacion:
-            instrucciones = INSTRUCCIONES_CONVERSACION.format(
-                usuario=usuario or "el usuario"
-            )
-            entrada = respuesta.interpretacion.texto_original
-        else:
-            instrucciones = INSTRUCCIONES.format(usuario=usuario or "el usuario")
-            entrada = self._redactar_hechos(respuesta, decision)
-        try:
-            generada = await self._motor.generar(
-                instrucciones, entrada, temperatura=0.5, max_tokens=300,
-            )
-            return generada.texto
-        except ErrorLenguaje as exc:
-            logger.warning("No se pudo redactar la respuesta: %s", exc)
-            return self._respaldo(decision)
 
     # ------------------------------------------------------------------
 
@@ -280,3 +248,73 @@ class Expresador:
             elif r.tipo != TipoIntencion.CONVERSAR:
                 lineas.append(self._formatear(r).capitalize() + ".")
         return " ".join(lineas) or "No tengo nada para decir sobre eso."
+
+    async def expresar(
+        self,
+        respuesta: Respuesta,
+        decision: Decision,
+        usuario: str = "",
+        previos: list | None = None,
+    ) -> str:
+        """Convierte los resultados en una respuesta en palabras.
+
+        Devuelve cadena vacía cuando ABEL no tiene nada que decir. El silencio
+        es una respuesta válida: la interfaz lo señala con un gesto, no con
+        una frase de relleno.
+        """
+        if not decision.habla:
+            return ""
+
+        solo_conversacion = all(
+            r.intencion.tipo == TipoIntencion.CONVERSAR
+            for r in decision.resueltos
+        )
+
+        historial = self._redactar_historial(previos)
+
+        if solo_conversacion:
+            instrucciones = INSTRUCCIONES_CONVERSACION.format(
+                usuario=usuario or "el usuario"
+            )
+            entrada = historial + respuesta.interpretacion.texto_original
+        else:
+            instrucciones = INSTRUCCIONES.format(usuario=usuario or "el usuario")
+            entrada = historial + self._redactar_hechos(respuesta, decision)
+
+        try:
+            generada = await self._motor.generar(
+                instrucciones, entrada,
+                temperatura=0.85 if solo_conversacion else 0.4,
+                max_tokens=300,
+            )
+            return generada.texto
+        except ErrorLenguaje as exc:
+            logger.warning("No se pudo redactar la respuesta: %s", exc)
+            return self._respaldo(decision)
+
+    @staticmethod
+    def _redactar_historial(previos: list | None) -> str:
+        """Formatea los turnos anteriores como conversación.
+
+        Un turno vacío de ABEL fue un silencio deliberado. Se marca, porque
+        callar dos veces seguidas ante lo mismo no es lo mismo que callar una.
+        """
+        if not previos:
+            return ""
+
+        lineas = ["Lo que venían hablando:\n"]
+        for turno in previos:
+            hablante = turno.get("hablante", "")
+            texto = (turno.get("texto") or "").strip()
+
+            if hablante == "abel":
+                lineas.append(f"vos: {texto}" if texto else "vos: (no dijiste nada)")
+            else:
+                lineas.append(f"él: {texto}")
+        
+        lineas.append(
+            "\nATENCIÓN: fijate si lo que dice ahora ya lo dijo antes. "
+            "Si es así, NO repitas tu respuesta anterior — decí otra cosa, "
+            "o preguntale qué pasa.\n\nAhora dice:\n"
+        )
+        return "\n".join(lineas)

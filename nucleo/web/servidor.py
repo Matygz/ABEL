@@ -41,11 +41,14 @@ class ServidorWeb:
         version: str,
         host: str = "127.0.0.1",
         puerto: int = 8080,
+        conversacion=None,
     ) -> None:
         self._host = host
         self._puerto = puerto
 
-        rutas = construir_rutas(repositorio, memoria, sesiones, bus, version)
+        rutas = construir_rutas(
+            repositorio, memoria, sesiones, bus, version, conversacion
+        )
         # El montaje de archivos estáticos va último: Starlette evalúa las
         # rutas en orden, así que las de la API tienen prioridad y esto
         # atrapa todo lo demás.

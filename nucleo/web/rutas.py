@@ -58,19 +58,35 @@ def construir_rutas(
     sesiones: ServicioSesiones,
     bus: BusEventos,
     version: str,
+    conversacion=None,
 ) -> list:
     """Arma las rutas con sus dependencias ya resueltas.
 
     Sin inyección automática: cada ruta recibe lo que necesita por clausura,
     de forma explícita y visible.
     """
-
+    
     async def _sesion_de(request: Request) -> dict | None:
         token = request.cookies.get(COOKIE_SESION)
         if not token:
             return None
         return await repo.validar_sesion(token)
 
+    _abel_id = None
+
+    async def _actor_abel():
+        """El actor del sistema, para atribuirle los turnos de ABEL."""
+        nonlocal _abel_id
+        if _abel_id is None:
+            async with repo._conexion() as conn:
+                cur = await conn.execute(
+                    "SELECT id FROM actors "
+                    "WHERE actor_type = 'system' AND name = 'core'"
+                )
+                fila = await cur.fetchone()
+                _abel_id = fila["id"] if fila else None
+        return _abel_id
+    
     def requiere_sesion(funcion):
         @wraps(funcion)
         async def envoltorio(request: Request):
@@ -199,6 +215,34 @@ def construir_rutas(
                     })
         except WebSocketDisconnect:
             logger.debug("Interfaz desconectada del canal.")
+    @requiere_sesion
+    async def conversar(request: Request, sesion):
+            if conversacion is None:
+                return _json({"error": "lenguaje_no_disponible"}, status=503)
+    
+            try:
+                cuerpo = await request.json()
+            except Exception:
+                return _json({"error": "cuerpo_invalido"}, status=400)
+    
+            mensaje = str(cuerpo.get("mensaje", "")).strip()
+            if not mensaje:
+                return _json({"error": "mensaje_vacio"}, status=400)
+            if len(mensaje) > 4000:
+                return _json({"error": "mensaje_muy_largo"}, status=400)
+
+            turno = await conversacion.responder(
+            mensaje,
+            usuario=sesion["display_name"],
+            user_id=sesion["user_id"],
+            abel_id=await _actor_abel(),
+        )
+    
+            return _json({
+                "texto": turno.texto,
+                "postura": turno.postura,
+                "habla": turno.habla,
+            })
 
     return [
         Route("/api/sesion", estado_sesion),
@@ -208,6 +252,7 @@ def construir_rutas(
         Route("/api/sesiones-ventana", sesiones_ventana),
         Route("/api/presencia", presencia),
         Route("/api/estado", estado_sistema),
+        Route("/api/conversar", conversar, methods=["POST"]),
         WebSocketRoute("/api/canal", canal),
     ]
     

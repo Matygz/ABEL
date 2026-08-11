@@ -734,3 +734,55 @@ class Repositorio:
                         Jsonb({"session_id": str(session_id), "reason": "revoked"}),
                     ),
                 )
+# ------------------------------------------------------------------
+# Conversación
+# ------------------------------------------------------------------
+
+    async def registrar_turno(
+        self,
+        actor_id: UUID,
+        hablante: str,
+        texto: str,
+        metadatos: dict[str, Any] | None = None,
+    ) -> None:
+        """Registra un turno de conversación.
+
+        Los turnos son eventos como cualquier otro: quedan en el registro
+        append-only y se pueden consultar junto con el resto de la memoria.
+        """
+        payload = {"speaker": hablante, "text": texto}
+        if metadatos:
+            payload.update(metadatos)
+
+        await self.registrar_evento(
+            event_type="utterance",
+            actor_id=actor_id,
+            payload=payload,
+        )
+
+    async def ultimos_turnos(
+        self, user_id: UUID, cantidad: int = 8
+    ) -> list[dict[str, Any]]:
+        """Devuelve los últimos turnos de conversación, del más viejo al más nuevo.
+
+        Se consulta por el usuario, no por el actor de cada turno: una
+        conversación incluye lo que dijo ABEL y lo que dijo la persona.
+        """
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                SELECT occurred_at,
+                       payload->>'speaker' AS hablante,
+                       payload->>'text' AS texto
+                  FROM events
+                 WHERE event_type = 'utterance'
+                   AND (actor_id = %s
+                        OR payload->>'addressee' = %s)
+                 ORDER BY occurred_at DESC
+                 LIMIT %s
+                """,
+                (user_id, str(user_id), cantidad),
+            )
+            filas = await cur.fetchall()
+
+        return list(reversed(filas))
