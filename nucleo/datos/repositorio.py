@@ -613,7 +613,33 @@ class Repositorio:
 
         logger.info("Sesión abierta: %s en dispositivo %s", session_id, device_id)
         return token
+    
+    async def cerrar_sesiones_de(self, user_id: UUID, device_id: UUID) -> int:
+        """Revoca las sesiones activas de un usuario en un dispositivo.
 
+        Una sesión nueva reemplaza a la anterior del mismo par: acumularlas
+        no aporta nada y complica cerrarlas a distancia.
+        """
+        async with self._conexion() as conn:
+            cur = await conn.execute(
+                """
+                UPDATE sessions
+                   SET revoked_at = now()
+                 WHERE user_id = %s AND device_id = %s
+                   AND revoked_at IS NULL
+                RETURNING id
+                """,
+                (user_id, device_id),
+            )
+            cerradas = await cur.fetchall()
+
+        if cerradas:
+            logger.debug(
+                "Reemplazadas %d sesión(es) previas de %s en %s",
+                len(cerradas), user_id, device_id,
+            )
+        return len(cerradas)
+    
     async def validar_sesion(self, token: str) -> dict[str, Any] | None:
         """Devuelve los datos de la sesión si el token es válido.
 

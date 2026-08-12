@@ -563,12 +563,27 @@ function horaDe(iso) {
   });
 }
 
+let abriendoSesion = false;
+
 window.abrirSesion = async function () {
+  if (abriendoSesion) return;
+  abriendoSesion = true;
+
+  const boton = document.querySelector("#entrada button");
+  if (boton) { boton.disabled = true; boton.textContent = "…"; }
   $("error").textContent = "";
-  const r = await fetch("/api/sesion/abrir", { method: "POST" });
-  if (r.ok) return iniciar();
-  const datos = await r.json().catch(() => ({}));
-  $("error").textContent = datos.error || "No se pudo abrir la sesión.";
+
+  try {
+    const r = await fetch("/api/sesion/abrir", { method: "POST" });
+    if (r.ok) return iniciar();
+    const datos = await r.json().catch(() => ({}));
+    $("error").textContent = datos.error || "No se pudo abrir la sesión.";
+  } catch (e) {
+    $("error").textContent = "Sin conexión.";
+  } finally {
+    abriendoSesion = false;
+    if (boton) { boton.disabled = false; boton.textContent = "Entrar"; }
+  }
 };
 
 /* --- Paneles ------------------------------------------------------ */

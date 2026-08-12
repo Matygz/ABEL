@@ -240,6 +240,10 @@ def _construir_parser() -> argparse.ArgumentParser:
 
 
 async def _main() -> int:
+    # La consola de Windows usa cp1252 por defecto y no puede escribir
+    # caracteres como → o ·. Se fuerza UTF-8 en la salida.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     args = _construir_parser().parse_args()
     configurar_logging("WARNING")
 

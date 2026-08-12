@@ -55,7 +55,11 @@ class ServicioSesiones:
 
         claves = await self._repo.obtener_claves_activas(device_id)
         material = material_sesion(desafio, solicitud_id, device_id)
-
+        # Si ya hay una sesión activa reciente para este usuario y dispositivo,
+        # se cierra antes de abrir la nueva. Sin esto, cada intento acumula
+        # una sesión más: pedirle al Nodo que firme cuesta tiempo, y nueve
+        # sesiones abiertas son nueve firmas y nueve escrituras.
+        await self._repo.cerrar_sesiones_de(user_id, device_id)
         try:
             firma = desde_texto(firma_texto)
         except ErrorFirma:
@@ -67,7 +71,7 @@ class ServicioSesiones:
             raise ErrorSesion("La autorización del Nodo no es válida.")
 
         token = await self._repo.abrir_sesion(user_id, device_id)
-        logger.info("Sesión abierta desde %s (dispositivo %s)", direccion, device_id)
+        logger.debug("Sesión abierta desde %s (dispositivo %s)", direccion, device_id)
         return token
 
     async def _registrar_rechazo(
