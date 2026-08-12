@@ -12,16 +12,14 @@ from pathlib import Path
 
 from websockets.asyncio.client import connect
 
-URL = "wss://localhost:8765"
+URL = "wss://127.0.0.1:8765"
 CERT_FALSO = Path("certs_prueba")
-
 
 def _contexto(certificado: Path) -> ssl.SSLContext:
     contexto = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     contexto.minimum_version = ssl.TLSVersion.TLSv1_2
     contexto.load_verify_locations(cafile=str(certificado))
     return contexto
-
 
 async def _conectar(contexto: ssl.SSLContext) -> str:
     try:

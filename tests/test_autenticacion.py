@@ -20,8 +20,17 @@ from protocolos.firma import (
 )
 from protocolos.mensajes import TipoMensaje, deserializar
 
-URL = "ws://127.0.0.1:8765"
+URL = "wss://127.0.0.1:8765"
 
+import ssl
+
+URL = "wss://127.0.0.1:8765"
+
+def _contexto():
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.load_verify_locations(cafile="certs/nucleo.crt")
+    return ctx
 
 def _config():
     datos = json.loads(Path("nodo.config.json").read_text(encoding="utf-8"))
@@ -32,7 +41,7 @@ def _config():
 
 async def _intentar(device_id, clave_privada, mandar_credencial=True):
     """Ejecuta el saludo completo. Devuelve el tipo del último mensaje."""
-    async with connect(URL) as ws:
+    async with connect(URL, ssl=_contexto()) as ws:
         await ws.send(crear_hello(device_id, ["presence"], "test").serializar())
         sobre = deserializar(await ws.recv())
 
