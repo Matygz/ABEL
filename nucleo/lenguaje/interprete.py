@@ -155,6 +155,8 @@ Mensaje: "¿me estoy quedando hasta tarde últimamente?"
   "parametros": {{"metrica": "actividad", "rango": "semana"}}}}],
   "ambiguedades": ["'últimamente' puede ser la última semana o el último mes"]}}
 
+  FIN DE LOS EJEMPLOS. Lo que sigue es el mensaje real a interpretar.
+  
 REGLAS:
 
 1. Un mensaje puede tener VARIAS intenciones. Ordenalas por importancia: lo
@@ -280,13 +282,14 @@ class Interprete:
         """Interpretación por defecto cuando el modelo no ayuda.
 
         Conversar es la opción más segura: no consulta datos, no ejecuta
-        nada, y deja que el usuario reformule.
+        nada. La confianza es media, no baja: que el intérprete haya fallado
+        no significa que no haya que responder.
         """
         return Interpretacion(
             intenciones=(
                 Intencion(
                     tipo=TipoIntencion.CONVERSAR,
-                    confianza=0.2,
+                    confianza=0.5,
                     parametros={"registro": "casual"},
                 ),
             ),

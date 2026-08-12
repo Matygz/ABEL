@@ -137,15 +137,18 @@ class Criterio:
         intencion, resultado = resuelto.intencion, resuelto.resultado
 
         # Una interpretación dudosa produce respuestas que no vienen al caso.
+        if intencion.tipo == TipoIntencion.CONVERSAR:
+            # Una conversación nunca se descarta por confianza: la confianza
+            # mide qué tan claro está de qué clase de cosa es, y ante la duda
+            # responder algo es mejor que callar.
+            return True
+
         if intencion.dudosa:
             logger.debug(
                 "Descartado por baja confianza: %s (%.2f)",
                 intencion.tipo, intencion.confianza,
             )
             return False
-
-        if intencion.tipo == TipoIntencion.CONVERSAR:
-            return True
 
         # Un resultado que no se pudo obtener por un fallo interno no es
         # información: es ruido. El límite declarado sí se dice.

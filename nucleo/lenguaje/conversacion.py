@@ -114,6 +114,12 @@ class Conversacion:
             "Turno: %d intención(es), postura %s",
             len(interpretacion.intenciones), decision.postura.value,
         )
+        logger.warning(
+            "DECISIÓN: %s | intenciones=%r | motivo=%r",
+            decision.postura.value,
+            [(i.tipo, round(i.confianza, 2)) for i in interpretacion.intenciones],
+            decision.motivo,
+        )
 
         return Turno(
             texto=texto,
