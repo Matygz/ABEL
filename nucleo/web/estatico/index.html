@@ -750,7 +750,12 @@ function decir(texto, clase) {
   linea.className = `dicho ${clase}`;
   linea.textContent = texto;
   $("conversacion").append(linea);
-  $("conversacion").scrollTop = $("conversacion").scrollHeight;
+  // requestAnimationFrame para que el scroll ocurra después de que el
+  // navegador midió el elemento nuevo: hacerlo antes calcula sobre la
+  // altura vieja y queda corto.
+  requestAnimationFrame(() => {
+    $("conversacion").scrollTop = $("conversacion").scrollHeight;
+  });
   return linea;
 }
 
@@ -819,6 +824,21 @@ $("mensaje").addEventListener("keydown", e => {
   if (texto) enviar(texto);
 });
 
+async function cargarHistorial() {
+  const { ok, datos } = await api("/api/historial");
+  if (!ok || !datos.length) return;
+
+  $("conversacion").innerHTML = "";
+  for (const turno of datos) {
+    if (turno.hablante === "abel") {
+      decir(turno.callo ? "· · ·" : turno.texto,
+            turno.callo ? "silencio" : "abel");
+    } else {
+      decir(turno.texto, "propio");
+    }
+  }
+}
+
 async function iniciar() {
   const { datos } = await api("/api/sesion");
 
@@ -833,9 +853,13 @@ async function iniciar() {
   $("marcas").hidden = false;
   lienzo.classList.add("visible");
   $("identidad").textContent = `${datos.usuario} · ${datos.dispositivo}`;
-  $("identidad").textContent = `${datos.usuario} · ${datos.dispositivo}`;
   $("boton-admin").hidden =
     !(datos.rol === "admin" && datos.confianza === "admin");
+  requestAnimationFrame(() => {
+    $("conversacion").scrollTop = $("conversacion").scrollHeight;
+  });
+
+  await cargarHistorial();
   actualizarHora();
   setInterval(actualizarHora, 20000);
   conectarCanal();

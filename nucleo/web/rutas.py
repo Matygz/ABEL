@@ -190,6 +190,39 @@ def construir_rutas(
     async def estado_sistema(request: Request, sesion):
         return _json(await memoria.estado_del_sistema())
 
+    @requiere_sesion
+    async def historial(request: Request, sesion):
+        """Turnos de la conversación en curso, del más viejo al más nuevo.
+
+        Acotado a la sesión: al recargar la página se recupera lo que venían
+        hablando, pero abrir una sesión nueva empieza de cero.
+        """
+        limite = min(int(request.query_params.get("limite", 30)), 100)
+
+        turnos = await repo.consultar(
+            """
+            SELECT occurred_at,
+                   payload->>'speaker' AS hablante,
+                   payload->>'text' AS texto,
+                   payload->>'postura' AS postura
+              FROM events
+             WHERE event_type = 'utterance'
+               AND payload->>'session_id' = %s
+             ORDER BY occurred_at DESC
+             LIMIT %s
+            """,
+            (str(sesion["id"]), limite),
+        )
+
+        return _json([
+            {
+                "momento": t["occurred_at"],
+                "hablante": t["hablante"],
+                "texto": t["texto"],
+                "callo": t["hablante"] == "abel" and not (t["texto"] or "").strip(),
+            }
+            for t in reversed(turnos)
+        ])
     # ------------------------------------------------------------------
     # Canal en vivo
     # ------------------------------------------------------------------
@@ -255,6 +288,8 @@ def construir_rutas(
         Route("/api/presencia", presencia),
         Route("/api/estado", estado_sistema),
         Route("/api/conversar", conversar, methods=["POST"]),
+        Route("/api/historial", historial),
         WebSocketRoute("/api/canal", canal),
     ]
+    
     
