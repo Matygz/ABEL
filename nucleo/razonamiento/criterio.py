@@ -88,26 +88,37 @@ class Criterio:
             return (sin_alcance[0],)
 
         return tuple(r for r in candidatos if self._aporta(r))
+
     @staticmethod
     def _ya_lo_dijo(respuesta: Respuesta, previos: list | None) -> bool:
-        """Si el mensaje repite algo reciente al pie de la letra.
+        """Si el mensaje repite exactamente lo último que la persona dijo.
 
-        Contestar lo mismo dos veces es de máquina. Alguien que repite un
-        saludo en el mismo minuto está haciendo otra cosa que saludar.
+        Solo mira el intercambio inmediatamente anterior, y solo si ABEL
+        respondió: repetir algo dos veces seguidas es insistencia; volver a
+        decirlo cinco turnos después es otra cosa.
+
+        Y si ABEL ya calló, no vuelve a callar — insistir con el silencio es
+        peor que decir algo.
         """
-        if not previos:
+        if not previos or len(previos) < 2:
             return False
 
         actual = respuesta.interpretacion.texto_original.strip().lower()
         if not actual:
             return False
 
-        dichos = [
-            (t.get("texto") or "").strip().lower()
-            for t in previos[-6:]
-            if t.get("hablante") != "abel"
-        ]
-        return actual in dichos
+        ultimo_usuario = previos[-2]
+        ultimo_abel = previos[-1]
+
+        if ultimo_usuario.get("hablante") == "abel":
+            return False
+        if ultimo_abel.get("hablante") != "abel":
+            return False
+
+        mismo = (ultimo_usuario.get("texto") or "").strip().lower() == actual
+        respondio = bool((ultimo_abel.get("texto") or "").strip())
+
+        return mismo and respondio
     
     @staticmethod
     def _desahogo(candidatos: list[Resuelto]) -> Resuelto | None:

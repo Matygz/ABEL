@@ -17,6 +17,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from comun.eventos import BusEventos
 from nucleo.datos.repositorio import Repositorio
+from nucleo.lenguaje import conversacion
 from nucleo.memoria.consultas import Memoria, hoy, ultimas_horas, ultimos_dias
 from nucleo.web.sesiones import ErrorSesion, ServicioSesiones
 
@@ -236,6 +237,7 @@ def construir_rutas(
             usuario=sesion["display_name"],
             user_id=sesion["user_id"],
             abel_id=await _actor_abel(),
+            session_id=sesion["id"],
         )
     
             return _json({

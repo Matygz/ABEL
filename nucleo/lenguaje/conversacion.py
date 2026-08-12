@@ -60,7 +60,12 @@ class Conversacion:
         self._turnos = turnos_recordados
 
     async def responder(
-        self, mensaje: str, usuario: str = "", user_id=None, abel_id=None
+        self,
+        mensaje: str,
+        usuario: str = "",
+        user_id=None,
+        abel_id=None,
+        session_id=None,
     ) -> Turno:
         """Procesa un mensaje y devuelve lo que ABEL tenga para decir."""
         mensaje = mensaje.strip()
@@ -69,18 +74,20 @@ class Conversacion:
 
         await self._modelo.asegurar_disponible()
 
-        if user_id is not None:
-            try:
-                await self._repo.registrar_turno(user_id, "user", mensaje)
-            except Exception:
-                logger.exception("FALLO AL GUARDAR EL TURNO")
-
+        # El historial se lee ANTES de registrar el turno actual: si no, el
+        # mensaje recién llegado aparecería como parte de lo que venían
+        # hablando y se detectaría a sí mismo como repetición.
         previos = (
-            await self._repo.ultimos_turnos(user_id, self._turnos + 1)
-            if user_id is not None else []
+            await self._repo.ultimos_turnos(user_id, session_id, self._turnos)
+            if user_id is not None and session_id is not None else []
         )
-        # El último es el mensaje recién registrado.
-        previos = previos[:-1] if previos else []
+        logger.warning("PREVIOS: sesion=%s cantidad=%d %r",
+                       session_id, len(previos),
+                       [(t.get("hablante"), t.get("texto")) for t in previos])
+        if user_id is not None:
+            await self._repo.registrar_turno(
+                user_id, "user", mensaje, session_id=session_id
+            )
 
         contexto = await self._contexto.obtener(usuario=usuario)
         interpretacion = await self._interprete.interpretar(mensaje, contexto)
@@ -95,6 +102,7 @@ class Conversacion:
                 abel_id,
                 "abel",
                 texto,
+                session_id=session_id,
                 metadatos={
                     "addressee": str(user_id),
                     "postura": decision.postura.value,
