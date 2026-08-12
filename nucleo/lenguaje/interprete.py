@@ -19,6 +19,7 @@ from typing import Any
 
 from nucleo.lenguaje.contexto import ContextoABEL
 from nucleo.lenguaje.motor import ErrorLenguaje, MotorLenguaje
+from nucleo.lenguaje import patrones
 
 logger = logging.getLogger(__name__)
 
@@ -182,15 +183,21 @@ class Interprete:
     async def interpretar(
         self, mensaje: str, contexto: ContextoABEL
     ) -> Interpretacion:
-        """Convierte un mensaje en intenciones estructuradas.
-
-        Si el modelo falla o devuelve algo inutilizable, se asume que el
-        mensaje es conversación: es la degradación más segura, porque
-        conversar no consulta datos ni ejecuta nada.
-        """
+        """Convierte un mensaje en intenciones estructuradas."""
         mensaje = mensaje.strip()
         if not mensaje:
             return Interpretacion(intenciones=())
+
+        # Primera capa: lo que se reconoce sin modelo. Instantáneo y exacto.
+        directo = patrones.reconocer(mensaje)
+        if directo is not None:
+            tipo, parametros = directo
+            return Interpretacion(
+                intenciones=(
+                    Intencion(tipo=tipo, confianza=1.0, parametros=parametros),
+                ),
+                texto_original=mensaje,
+            )
 
         instrucciones = INSTRUCCIONES.format(contexto=contexto.a_texto())
 

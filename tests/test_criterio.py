@@ -18,13 +18,14 @@ from nucleo.razonamiento.motor_calculo import MotorCalculo
 from nucleo.razonamiento.motor_memoria import MotorMemoria
 
 MENSAJES = [
+    "11 x 11",
+    "¿cuánto es 4 x 29?",
     "¿cuánto tiempo estuve en Code hoy?",
     "si tiro 3 dados, ¿cuál es la probabilidad de sacar más de 15?",
     "estuve todo el día en el código y estoy quemado",
     "¿dónde estuve ayer a las 6?",
     "me siento como el orto",
     "hola",
-    "nada, no importa",
 ]
 
 SIMBOLO = {
