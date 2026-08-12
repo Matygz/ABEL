@@ -155,8 +155,8 @@ Mensaje: "¿me estoy quedando hasta tarde últimamente?"
   "parametros": {{"metrica": "actividad", "rango": "semana"}}}}],
   "ambiguedades": ["'últimamente' puede ser la última semana o el último mes"]}}
 
-  FIN DE LOS EJEMPLOS. Lo que sigue es el mensaje real a interpretar.
-  
+FIN DE LOS EJEMPLOS. Lo que sigue es el mensaje real a interpretar.
+
 REGLAS:
 
 1. Un mensaje puede tener VARIAS intenciones. Ordenalas por importancia: lo
