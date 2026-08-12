@@ -64,7 +64,31 @@ class Repositorio:
         except psycopg.Error as exc:
             logger.debug("Fallo de base de datos: %s", exc)
             raise ErrorRepositorio(str(exc)) from exc
+        
+    async def consultar(
+        self, sql: str, parametros: tuple = ()
+    ) -> list[dict[str, Any]]:
+        """Ejecuta una consulta de lectura y devuelve las filas.
 
+        Es la puerta pública para módulos que necesitan consultar la memoria
+        con SQL propio: `nucleo/memoria` agrega y resume, y sus consultas no
+        tienen por qué vivir acá.
+
+        Solo lectura. Las escrituras pasan por métodos con nombre, para que
+        cada cosa que ABEL modifica quede explícita en la interfaz.
+        """
+        async with self._conexion() as conn:
+            cur = await conn.execute(sql, parametros)
+            return await cur.fetchall()
+
+    async def consultar_una(
+        self, sql: str, parametros: tuple = ()
+    ) -> dict[str, Any] | None:
+        """Como `consultar`, pero devuelve la primera fila o None."""
+        async with self._conexion() as conn:
+            cur = await conn.execute(sql, parametros)
+            return await cur.fetchone()
+        
     # ------------------------------------------------------------------
     # Lectura
     # ------------------------------------------------------------------

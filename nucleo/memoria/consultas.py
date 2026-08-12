@@ -39,25 +39,23 @@ class Memoria:
         self, desde: datetime, hasta: datetime, minimo_segundos: float = 0.0
     ) -> list[dict[str, Any]]:
         """Tiempo total en cada aplicación dentro de un rango."""
-        async with self._repo._conexion() as conn:
-            cur = await conn.execute(
-                """
-                SELECT
-                    payload->>'application' AS aplicacion,
-                    COUNT(*) AS sesiones,
-                    SUM((payload->>'duration_seconds')::numeric) AS segundos,
-                    MIN(occurred_at) AS primera,
-                    MAX(occurred_at) AS ultima
-                  FROM events
-                 WHERE event_type = 'window_session'
-                   AND occurred_at >= %s AND occurred_at < %s
-                 GROUP BY 1
-                HAVING SUM((payload->>'duration_seconds')::numeric) >= %s
-                 ORDER BY segundos DESC
-                """,
-                (desde, hasta, minimo_segundos),
-            )
-            filas = await cur.fetchall()
+        filas = await self._repo.consultar(
+            """
+            SELECT
+                payload->>'application' AS aplicacion,
+                COUNT(*) AS sesiones,
+                SUM((payload->>'duration_seconds')::numeric) AS segundos,
+                MIN(occurred_at) AS primera,
+                MAX(occurred_at) AS ultima
+              FROM events
+             WHERE event_type = 'window_session'
+               AND occurred_at >= %s AND occurred_at < %s
+             GROUP BY 1
+            HAVING SUM((payload->>'duration_seconds')::numeric) >= %s
+             ORDER BY segundos DESC
+            """,
+            (desde, hasta, minimo_segundos),
+        )
 
         return [
             {
@@ -74,23 +72,21 @@ class Memoria:
         self, desde: datetime, hasta: datetime, limite: int = 100
     ) -> list[dict[str, Any]]:
         """Sesiones de uso individuales, de la más reciente a la más antigua."""
-        async with self._repo._conexion() as conn:
-            cur = await conn.execute(
-                """
-                SELECT occurred_at,
-                       payload->>'application' AS aplicacion,
-                       payload->>'title' AS titulo,
-                       (payload->>'duration_seconds')::numeric AS segundos,
-                       payload->>'reason' AS motivo
-                  FROM events
-                 WHERE event_type = 'window_session'
-                   AND occurred_at >= %s AND occurred_at < %s
-                 ORDER BY occurred_at DESC
-                 LIMIT %s
-                """,
-                (desde, hasta, limite),
-            )
-            filas = await cur.fetchall()
+        filas = await self._repo.consultar(
+            """
+            SELECT occurred_at,
+                   payload->>'application' AS aplicacion,
+                   payload->>'title' AS titulo,
+                   (payload->>'duration_seconds')::numeric AS segundos,
+                   payload->>'reason' AS motivo
+              FROM events
+             WHERE event_type = 'window_session'
+               AND occurred_at >= %s AND occurred_at < %s
+             ORDER BY occurred_at DESC
+             LIMIT %s
+            """,
+            (desde, hasta, limite),
+        )
 
         return [
             {
@@ -109,24 +105,22 @@ class Memoria:
         Busca la sesión de ventana que contiene ese instante: la que terminó
         después del momento y empezó antes.
         """
-        async with self._repo._conexion() as conn:
-            cur = await conn.execute(
-                """
-                SELECT occurred_at,
-                       payload->>'application' AS aplicacion,
-                       payload->>'title' AS titulo,
-                       (payload->>'duration_seconds')::numeric AS segundos
-                  FROM events
-                 WHERE event_type = 'window_session'
-                   AND occurred_at >= %s
-                   AND occurred_at - ((payload->>'duration_seconds')::numeric
-                                      * INTERVAL '1 second') <= %s
-                 ORDER BY occurred_at
-                 LIMIT 1
-                """,
-                (momento, momento),
-            )
-            fila = await cur.fetchone()
+        fila = await self._repo.consultar_una(
+            """
+            SELECT occurred_at,
+                   payload->>'application' AS aplicacion,
+                   payload->>'title' AS titulo,
+                   (payload->>'duration_seconds')::numeric AS segundos
+              FROM events
+             WHERE event_type = 'window_session'
+               AND occurred_at >= %s
+               AND occurred_at - ((payload->>'duration_seconds')::numeric
+                                  * INTERVAL '1 second') <= %s
+             ORDER BY occurred_at
+             LIMIT 1
+            """,
+            (momento, momento),
+        )
 
         if fila is None:
             return None
@@ -150,22 +144,20 @@ class Memoria:
         Devuelve los cambios de estado, no una interpretación: `idle` significa
         que no hubo entrada de teclado ni mouse, no que el usuario no estuviera.
         """
-        async with self._repo._conexion() as conn:
-            cur = await conn.execute(
-                """
-                SELECT occurred_at,
-                       payload->>'state' AS estado,
-                       payload->>'previous' AS anterior,
-                       a.name AS dispositivo
-                  FROM events e
-                  JOIN actors a ON a.id = e.actor_id
-                 WHERE event_type = 'session_state'
-                   AND occurred_at >= %s AND occurred_at < %s
-                 ORDER BY occurred_at
-                """,
-                (desde, hasta),
-            )
-            filas = await cur.fetchall()
+        filas = await self._repo.consultar(
+            """
+            SELECT occurred_at,
+                   payload->>'state' AS estado,
+                   payload->>'previous' AS anterior,
+                   a.name AS dispositivo
+              FROM events e
+              JOIN actors a ON a.id = e.actor_id
+             WHERE event_type = 'session_state'
+               AND occurred_at >= %s AND occurred_at < %s
+             ORDER BY occurred_at
+            """,
+            (desde, hasta),
+        )
 
         return [
             {
@@ -183,43 +175,36 @@ class Memoria:
 
     async def estado_del_sistema(self) -> dict[str, Any]:
         """Panorama de ABEL: ejecuciones, dispositivos y volumen de memoria."""
-        async with self._repo._conexion() as conn:
-            cur = await conn.execute(
-                """
-                SELECT id, started_at, ended_at, stop_reason, pid
-                  FROM runs ORDER BY started_at DESC LIMIT 5
-                """
-            )
-            ejecuciones = await cur.fetchall()
+        ejecuciones = await self._repo.consultar(
+            """
+            SELECT id, started_at, ended_at, stop_reason, pid
+              FROM runs ORDER BY started_at DESC LIMIT 5
+            """
+        )
 
-            cur = await conn.execute(
-                """
-                SELECT a.name, d.trust_level, d.platform,
-                       MAX(e.occurred_at) AS ultima_senal
-                  FROM devices d
-                  JOIN actors a ON a.id = d.id
-                  LEFT JOIN events e ON e.actor_id = d.id
-                 WHERE d.revoked_at IS NULL
-                 GROUP BY a.name, d.trust_level, d.platform
-                 ORDER BY ultima_senal DESC NULLS LAST
-                """
-            )
-            dispositivos = await cur.fetchall()
+        dispositivos = await self._repo.consultar(
+            """
+            SELECT a.name, d.trust_level, d.platform,
+                   MAX(e.occurred_at) AS ultima_senal
+              FROM devices d
+              JOIN actors a ON a.id = d.id
+              LEFT JOIN events e ON e.actor_id = d.id
+             WHERE d.revoked_at IS NULL
+             GROUP BY a.name, d.trust_level, d.platform
+             ORDER BY ultima_senal DESC NULLS LAST
+            """
+        )
 
-            cur = await conn.execute(
-                """
-                SELECT event_type, COUNT(*) AS cantidad,
-                       MIN(occurred_at) AS desde, MAX(occurred_at) AS hasta
-                  FROM events GROUP BY 1 ORDER BY cantidad DESC
-                """
-            )
-            eventos = await cur.fetchall()
+        eventos = await self._repo.consultar(
+            """
+            SELECT event_type, COUNT(*) AS cantidad,
+                   MIN(occurred_at) AS desde, MAX(occurred_at) AS hasta
+              FROM events GROUP BY 1 ORDER BY cantidad DESC
+            """
+        )
 
         vigente = ejecuciones[0] if ejecuciones else None
-        caidas = [
-            e for e in ejecuciones[1:]
-            if e["ended_at"] is None
-        ]
+        caidas = [e for e in ejecuciones[1:] if e["ended_at"] is None]
 
         return {
             "ejecucion_vigente": (
@@ -261,26 +246,24 @@ class Memoria:
         Un hueco indica que el actor estuvo caído o incomunicado. Es la
         contrapartida de la marca: su valor está en la ausencia.
         """
-        async with self._repo._conexion() as conn:
-            cur = await conn.execute(
-                """
-                SELECT anterior, occurred_at AS siguiente,
-                       EXTRACT(EPOCH FROM (occurred_at - anterior)) AS segundos
-                  FROM (
-                    SELECT occurred_at,
-                           LAG(occurred_at) OVER (ORDER BY occurred_at) AS anterior
-                      FROM events
-                     WHERE event_type = 'presence_mark'
-                       AND actor_id = %s
-                       AND occurred_at >= %s AND occurred_at < %s
-                  ) t
-                 WHERE anterior IS NOT NULL
-                   AND occurred_at - anterior > (%s * INTERVAL '1 second')
-                 ORDER BY anterior
-                """,
-                (actor_id, desde, hasta, tolerancia_segundos),
-            )
-            filas = await cur.fetchall()
+        filas = await self._repo.consultar(
+            """
+            SELECT anterior, occurred_at AS siguiente,
+                   EXTRACT(EPOCH FROM (occurred_at - anterior)) AS segundos
+              FROM (
+                SELECT occurred_at,
+                       LAG(occurred_at) OVER (ORDER BY occurred_at) AS anterior
+                  FROM events
+                 WHERE event_type = 'presence_mark'
+                   AND actor_id = %s
+                   AND occurred_at >= %s AND occurred_at < %s
+              ) t
+             WHERE anterior IS NOT NULL
+               AND occurred_at - anterior > (%s * INTERVAL '1 second')
+             ORDER BY anterior
+            """,
+            (actor_id, desde, hasta, tolerancia_segundos),
+        )
 
         return [
             {

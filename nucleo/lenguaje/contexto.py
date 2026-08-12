@@ -113,8 +113,8 @@ class ProveedorContexto:
         desde: datetime | None = None
 
         try:
-            async with self._repo._conexion() as conn:
-                cur = await conn.execute(
+            aplicaciones = tuple(
+                f["app"] for f in await self._repo.consultar(
                     """
                     SELECT DISTINCT payload->>'application' AS app
                       FROM events
@@ -125,20 +125,19 @@ class ProveedorContexto:
                      LIMIT 40
                     """
                 )
-                aplicaciones = tuple(f["app"] for f in await cur.fetchall())
+            )
 
-                cur = await conn.execute("SELECT MIN(occurred_at) AS d FROM events")
-                fila = await cur.fetchone()
-                desde = fila["d"] if fila else None
+            fila = await self._repo.consultar_una(
+                "SELECT MIN(occurred_at) AS d FROM events"
+            )
+            desde = fila["d"] if fila else None
 
             activos = await self._repo.listar_dispositivos()
             dispositivos = tuple(d["name"] for d in activos)
 
         except ErrorRepositorio as exc:
-            # Sin contexto el modelo interpreta peor, pero puede seguir.
-            # Es preferible a que la conversación falle por completo.
             logger.warning("No se pudo armar el contexto completo: %s", exc)
-
+            
         return ContextoABEL(
             momento=ahora,
             aplicaciones=aplicaciones,
