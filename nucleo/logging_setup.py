@@ -48,6 +48,7 @@ def configurar_logging(nivel: str = "INFO") -> None:
     raiz.addHandler(consola)
     raiz.addHandler(archivo)
     logging.getLogger("websockets").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
 
 
 def ajustar_nivel(nivel: str) -> None:

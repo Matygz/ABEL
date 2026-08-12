@@ -162,29 +162,31 @@ class Planificador:
             raise
 
     async def _ejecutar_servicio(self, nombre: str, funcion: FuncionTarea) -> None:
-        """Mantiene vivo un servicio, reiniciándolo si termina o falla.
-
-        A diferencia de una tarea periódica, un servicio no lleva timeout: se
-        espera que esté bloqueado esperando trabajo. Esa es su función.
-        """
+        """Mantiene vivo un servicio, reiniciándolo si termina o falla."""
         espera_reinicio = 5.0
         try:
-            while True:
+            while not self._detener.is_set():
                 try:
                     await funcion()
+                    # Un servicio que retorna durante el apagado no se cayó:
+                    # se le pidió terminar. Relanzarlo ahí lo revive en medio
+                    # de la detención.
+                    if self._detener.is_set():
+                        return
                     logger.warning("El servicio %s terminó solo. Reiniciando.", nombre)
                 except ErrorOperativo as exc:
+                    if self._detener.is_set():
+                        return
                     logger.error(
                         "Servicio %s: %s. Reinicia en %ss.",
-                        nombre,
-                        str(exc).splitlines()[0],
-                        espera_reinicio,
+                        nombre, str(exc).splitlines()[0], espera_reinicio,
                     )
                 except Exception:
+                    if self._detener.is_set():
+                        return
                     logger.exception(
                         "Fallo inesperado en el servicio %s. Reinicia en %ss.",
-                        nombre,
-                        espera_reinicio,
+                        nombre, espera_reinicio,
                     )
                 await asyncio.sleep(espera_reinicio)
         except asyncio.CancelledError:

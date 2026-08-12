@@ -122,8 +122,16 @@ async def main() -> None:
         
 def _instalar_senales(planificador: Planificador, ciclo: CicloVida) -> None:
     """Hace que Ctrl+C solicite una detención ordenada."""
+    ya_pedido = False
 
     def manejar(signum, frame) -> None:
+        nonlocal ya_pedido
+        if ya_pedido:
+            return
+        ya_pedido = True
+        # Directo a la consola: el sistema de logging pasa por manejadores
+        # y formateo, y acá lo que importa es que se vea ya.
+        print("\nDeteniendo ABEL…", flush=True)
         logger.info("Señal recibida (%s). Deteniendo.", signum)
         ciclo.motivo_solicitado = "interrupted"
         planificador.detener()
