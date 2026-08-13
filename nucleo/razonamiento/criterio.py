@@ -122,14 +122,34 @@ class Criterio:
     
     @staticmethod
     def _desahogo(candidatos: list[Resuelto]) -> Resuelto | None:
-        """El desahogo tiene prioridad sobre cualquier dato."""
+        """El desahogo domina, salvo que la persona haya pedido el dato.
+
+        "Estuve todo el día en el código y estoy quemado" no pide datos: la
+        consulta la infirió ABEL, y responder con estadísticas sería contestar
+        la pregunta literal e ignorar la real.
+
+        "Estoy quemado de Code, ¿cuánto tiempo estuve?" sí los pide. Ahí
+        callar el dato es no responder lo que se preguntó.
+        """
+        emocional = None
         for resuelto in candidatos:
             if resuelto.intencion.tipo != TipoIntencion.CONVERSAR:
                 continue
             registro = resuelto.intencion.parametros.get("registro", "")
             if registro in ("desahogo", "malestar"):
-                return resuelto
-        return None
+                emocional = resuelto
+                break
+
+        if emocional is None:
+            return None
+
+        # Si alguna otra intención vino de una parte propia del mensaje, la
+        # persona la pidió: no se descarta.
+        hay_pedido_explicito = any(
+            r is not emocional and r.intencion.explicita
+            for r in candidatos
+        )
+        return None if hay_pedido_explicito else emocional
 
     @staticmethod
     def _aporta(resuelto: Resuelto) -> bool:
