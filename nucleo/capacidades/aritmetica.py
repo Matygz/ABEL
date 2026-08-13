@@ -15,7 +15,9 @@ TIPO = "calcular"
 DESCRIPCION = "Operaciones aritméticas exactas."
 NIVEL = "lectura"
 NECESITA = ("llm",)
-
+PARAMETROS = {
+    "enunciado": {"tipo": "texto_completo"},
+}
 EJEMPLOS = (
     "cuánto es 4 por 29",
     "sumame 145 más 78",
@@ -23,7 +25,6 @@ EJEMPLOS = (
     "calculá 17 al cuadrado",
     "cuánto es el 20 por ciento de 350",
 )
-
 
 async def resolver(parametros: dict, llm: MotorLenguaje) -> Resultado:
     intencion = Intencion(

@@ -12,7 +12,18 @@ TIPO = "consultar_memoria"
 DESCRIPCION = "Cuánto tiempo se usó cada aplicación."
 NIVEL = "lectura"
 NECESITA = ("memoria",)
-
+PARAMETROS = {
+    "rango": {
+        "tipo": "rango_temporal",
+        "descripcion": "período a consultar",
+        "default": "hoy",
+    },
+    "filtro": {
+        "tipo": "aplicacion",
+        "descripcion": "nombre de la aplicación mencionada",
+        "default": None,
+    },
+}
 EJEMPLOS = (
     "¿cuánto tiempo estuve en Code hoy?",
     "cuánto usé el editor",

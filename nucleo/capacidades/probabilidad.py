@@ -17,7 +17,9 @@ TIPO = "calcular"
 DESCRIPCION = "Probabilidad con dados, por enumeración exacta."
 NIVEL = "lectura"
 NECESITA = ("llm",)
-
+PARAMETROS = {
+    "enunciado": {"tipo": "texto_completo"},
+}
 EJEMPLOS = (
     "si tiro 3 dados, ¿cuál es la probabilidad de sacar más de 15?",
     "probabilidad de sacar 7 con dos dados",
@@ -27,7 +29,6 @@ EJEMPLOS = (
     "qué tan probable es sacar doble seis",
     "chances de sacar menos de 5 con dos dados",
 )
-
 
 async def resolver(parametros: dict, llm: MotorLenguaje) -> Resultado:
     intencion = Intencion(

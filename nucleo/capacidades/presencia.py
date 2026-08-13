@@ -12,7 +12,13 @@ TIPO = "consultar_memoria"
 DESCRIPCION = "Cuándo estuvo activo o inactivo frente a la máquina."
 NIVEL = "lectura"
 NECESITA = ("memoria",)
-
+PARAMETROS = {
+    "rango": {
+        "tipo": "rango_temporal",
+        "descripcion": "período a consultar",
+        "default": "hoy",
+    },
+}
 EJEMPLOS = (
     "¿cuándo estuve activo?",
     "a qué hora me puse a laburar",
@@ -25,7 +31,6 @@ EJEMPLOS = (
     "a qué hora me levanté",
     "estuve mucho rato inactivo",
 )
-
 
 def _rango(crudo: str | None):
     texto = str(crudo or "hoy").lower().strip()
