@@ -49,6 +49,9 @@ def configurar_logging(nivel: str = "INFO") -> None:
     raiz.addHandler(archivo)
     logging.getLogger("websockets").setLevel(logging.INFO)
     logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
+    for ruidoso in ("httpx", "huggingface_hub", "sentence_transformers",
+                    "transformers"):
+        logging.getLogger(ruidoso).setLevel(logging.WARNING)
 
 
 def ajustar_nivel(nivel: str) -> None:

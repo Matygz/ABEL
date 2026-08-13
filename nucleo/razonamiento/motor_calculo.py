@@ -20,7 +20,6 @@ from fractions import Fraction
 from itertools import product
 from typing import Any
 
-from nucleo.lenguaje.interprete import Intencion
 from nucleo.lenguaje.motor import ErrorLenguaje, MotorLenguaje
 from nucleo.razonamiento.resultado import Procedencia, Resultado, sin_alcance
 
@@ -90,9 +89,14 @@ class MotorCalculo:
     def __init__(self, motor_lenguaje: MotorLenguaje) -> None:
         self._llm = motor_lenguaje
 
-    async def resolver(self, intencion: Intencion) -> Resultado:
-        clase = str(intencion.parametros.get("clase", "")).lower()
-        enunciado = str(intencion.parametros.get("enunciado", "")).strip()
+    async def resolver(self, clase: str, enunciado: str) -> Resultado:
+        """Resuelve un problema de cálculo.
+
+        Recibe la clase y el enunciado sueltos: el motor no tiene por qué
+        conocer la estructura de intenciones del analizador.
+        """
+        clase = str(clase or "").lower()
+        enunciado = str(enunciado or "").strip()
 
         if not enunciado:
             return sin_alcance("un enunciado claro para calcular")

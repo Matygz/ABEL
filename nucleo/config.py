@@ -36,6 +36,7 @@ class ConfigEntorno:
     llm_modelo: str = ""
     llm_puerto: int = 8090
     llm_inactividad_segundos: float = 900.0
+    qdrant_url: str = "http://127.0.0.1:6333"
 
     @property
     def conninfo(self) -> str:
@@ -98,4 +99,5 @@ def cargar_config() -> ConfigEntorno:
         llm_modelo=os.getenv("ABEL_LLM_MODEL", ""),
         llm_puerto=int(os.getenv("ABEL_LLM_PORT", "8090")),
         llm_inactividad_segundos=float(os.getenv("ABEL_LLM_IDLE", "900")),
+        qdrant_url=os.getenv("ABEL_QDRANT_URL", "http://127.0.0.1:6333"),
     )

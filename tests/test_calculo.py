@@ -3,7 +3,6 @@
 import asyncio
 
 from nucleo.config import cargar_config
-from nucleo.lenguaje.interprete import Intencion, TipoIntencion
 from nucleo.lenguaje.motor import MotorLenguaje
 from nucleo.lenguaje.servidor_modelo import ServidorModelo
 from nucleo.razonamiento.motor_calculo import MotorCalculo
@@ -30,12 +29,7 @@ async def main():
     motor = MotorCalculo(motor_llm)
 
     for enunciado in ENUNCIADOS:
-        intencion = Intencion(
-            tipo=TipoIntencion.CALCULAR,
-            confianza=0.9,
-            parametros={"clase": "probabilidad", "enunciado": enunciado},
-        )
-        r = await motor.resolver(intencion)
+        r = await motor.resolver("probabilidad", enunciado)
 
         print(f"\n> {enunciado}")
         if not r.resuelto:

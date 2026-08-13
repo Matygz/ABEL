@@ -5,7 +5,6 @@ Llega acá por la capa de patrones, que reconoce expresiones sin modelo.
 
 from __future__ import annotations
 
-from nucleo.lenguaje.interprete import Intencion, TipoIntencion
 from nucleo.lenguaje.motor import MotorLenguaje
 from nucleo.razonamiento.motor_calculo import MotorCalculo
 from nucleo.razonamiento.resultado import Resultado
@@ -27,12 +26,6 @@ EJEMPLOS = (
 )
 
 async def resolver(parametros: dict, llm: MotorLenguaje) -> Resultado:
-    intencion = Intencion(
-        tipo=TipoIntencion.CALCULAR,
-        confianza=1.0,
-        parametros={
-            "clase": "aritmetica",
-            "enunciado": parametros.get("enunciado", ""),
-        },
+    return await MotorCalculo(llm).resolver(
+        "aritmetica", parametros.get("enunciado", "")
     )
-    return await MotorCalculo(llm).resolver(intencion)

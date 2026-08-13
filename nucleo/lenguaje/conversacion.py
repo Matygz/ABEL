@@ -1,6 +1,6 @@
 """El ciclo completo de una conversación con ABEL.
 
-Reúne las piezas: interpretar, resolver, decidir si vale la pena hablar, y
+Reúne las piezas: analizar, ejecutar, decidir si vale la pena hablar, y
 expresar. Es la puerta única — la interfaz web, un script o cualquier otra
 entrada llaman acá.
 
@@ -12,9 +12,9 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from nucleo.lenguaje.analizador import Analizador
 from nucleo.lenguaje.contexto import ProveedorContexto
 from nucleo.lenguaje.expresador import Expresador
-from nucleo.lenguaje.interprete import Interprete
 from nucleo.lenguaje.servidor_modelo import ServidorModelo
 from nucleo.razonamiento.criterio import Criterio, Postura
 from nucleo.razonamiento.despachador import Despachador
@@ -29,6 +29,7 @@ class Turno:
     texto: str
     postura: str
     intenciones: tuple[str, ...]
+    origenes: tuple[str, ...] = ()
     descartadas: int = 0
 
     @property
@@ -44,7 +45,7 @@ class Conversacion:
         repositorio,
         modelo: ServidorModelo,
         contexto: ProveedorContexto,
-        interprete: Interprete,
+        analizador: Analizador,
         despachador: Despachador,
         criterio: Criterio,
         expresador: Expresador,
@@ -53,7 +54,7 @@ class Conversacion:
         self._repo = repositorio
         self._modelo = modelo
         self._contexto = contexto
-        self._interprete = interprete
+        self._analizador = analizador
         self._despachador = despachador
         self._criterio = criterio
         self._expresador = expresador
@@ -72,6 +73,9 @@ class Conversacion:
         if not mensaje:
             return Turno(texto="", postura=Postura.CALLAR.value, intenciones=())
 
+        # El modelo se carga acá: si estaba descargado por inactividad, la
+        # primera respuesta tarda unos segundos más. Muchos mensajes no lo
+        # necesitan, pero el expresador sí.
         await self._modelo.asegurar_disponible()
 
         # El historial se lee ANTES de registrar el turno actual: si no, el
@@ -81,17 +85,15 @@ class Conversacion:
             await self._repo.ultimos_turnos(user_id, session_id, self._turnos)
             if user_id is not None and session_id is not None else []
         )
-        logger.warning("PREVIOS: sesion=%s cantidad=%d %r",
-                       session_id, len(previos),
-                       [(t.get("hablante"), t.get("texto")) for t in previos])
+
         if user_id is not None:
             await self._repo.registrar_turno(
                 user_id, "user", mensaje, session_id=session_id
             )
 
         contexto = await self._contexto.obtener(usuario=usuario)
-        interpretacion = await self._interprete.interpretar(mensaje, contexto)
-        resultados = await self._despachador.despachar(interpretacion)
+        analisis = await self._analizador.analizar(mensaje, contexto)
+        resultados = await self._despachador.despachar(analisis)
         decision = self._criterio.decidir(resultados, previos)
         texto = await self._expresador.expresar(
             resultados, decision, usuario, previos
@@ -106,24 +108,28 @@ class Conversacion:
                 metadatos={
                     "addressee": str(user_id),
                     "postura": decision.postura.value,
-                    "intenciones": [i.tipo for i in interpretacion.intenciones],
+                    "capacidades": [
+                        i.capacidad or "fuera_de_alcance"
+                        for i in analisis.intenciones
+                    ],
                 },
             )
 
         logger.info(
-            "Turno: %d intención(es), postura %s",
-            len(interpretacion.intenciones), decision.postura.value,
-        )
-        logger.warning(
-            "DECISIÓN: %s | intenciones=%r | motivo=%r",
+            "Turno: %s | %s | postura %s",
+            ", ".join(
+                i.capacidad or "fuera_de_alcance" for i in analisis.intenciones
+            ),
+            ", ".join(i.origen for i in analisis.intenciones),
             decision.postura.value,
-            [(i.tipo, round(i.confianza, 2)) for i in interpretacion.intenciones],
-            decision.motivo,
         )
 
         return Turno(
             texto=texto,
             postura=decision.postura.value,
-            intenciones=tuple(i.tipo for i in interpretacion.intenciones),
+            intenciones=tuple(
+                i.capacidad or "fuera_de_alcance" for i in analisis.intenciones
+            ),
+            origenes=tuple(i.origen for i in analisis.intenciones),
             descartadas=len(resultados.resueltos) - len(decision.resueltos),
         )

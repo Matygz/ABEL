@@ -7,7 +7,7 @@ número plausible y equivocado. Acá se cuentan los casos.
 
 from __future__ import annotations
 
-from nucleo.lenguaje.interprete import Intencion, TipoIntencion
+
 from nucleo.lenguaje.motor import MotorLenguaje
 from nucleo.razonamiento.motor_calculo import MotorCalculo
 from nucleo.razonamiento.resultado import Resultado
@@ -31,12 +31,7 @@ EJEMPLOS = (
 )
 
 async def resolver(parametros: dict, llm: MotorLenguaje) -> Resultado:
-    intencion = Intencion(
-        tipo=TipoIntencion.CALCULAR,
-        confianza=1.0,
-        parametros={
-            "clase": "probabilidad",
-            "enunciado": parametros.get("enunciado", ""),
-        },
+    return await MotorCalculo(llm).resolver(
+        "probabilidad", parametros.get("enunciado", "")
     )
     return await MotorCalculo(llm).resolver(intencion)

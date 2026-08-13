@@ -1,10 +1,10 @@
-"""Enruta cada intención al motor que sabe resolverla.
+"""Ejecuta las capacidades que el analizador identificó.
 
-No resuelve nada por sí mismo: decide quién lo hace. Agregar una clase nueva
-de problema es registrar un motor más, no modificar esta pieza.
+No decide nada: el analizador ya eligió qué capacidad corresponde y con qué
+parámetros. Acá solo se ejecutan y se juntan los resultados.
 
-Devuelve resultados, no texto. Cómo se dicen —y si se dicen— lo decide el
-expresador (5.3) y el criterio de habla (5.4).
+Las intenciones se resuelven en paralelo porque son independientes: si un
+mensaje pide un dato y además un cálculo, no hay razón para hacerlos en fila.
 """
 
 from __future__ import annotations
@@ -13,14 +13,13 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from nucleo.lenguaje.interprete import Intencion, Interpretacion, TipoIntencion
-from nucleo.razonamiento.motor_calculo import MotorCalculo
-from nucleo.razonamiento.motor_memoria import MotorMemoria
+from nucleo.capacidades.registro import ErrorCapacidad, RegistroCapacidades
+from nucleo.lenguaje.analizador import Analisis, Intencion
 from nucleo.razonamiento.resultado import Procedencia, Resultado, sin_alcance
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT_MOTOR = 45.0
+TIMEOUT_CAPACIDAD = 45.0
 
 
 @dataclass(frozen=True)
@@ -36,13 +35,11 @@ class Respuesta:
     """Todo lo que ABEL tiene para responder a un mensaje."""
 
     resueltos: tuple[Resuelto, ...]
-    interpretacion: Interpretacion
+    analisis: Analisis
 
     @property
     def hay_conversacion(self) -> bool:
-        return any(
-            r.intencion.tipo == TipoIntencion.CONVERSAR for r in self.resueltos
-        )
+        return any(r.intencion.tipo == "conversar" for r in self.resueltos)
 
     @property
     def datos_utiles(self) -> tuple[Resuelto, ...]:
@@ -54,66 +51,62 @@ class Respuesta:
 
 
 class Despachador:
-    """Manda cada intención al motor correspondiente."""
+    """Ejecuta capacidades y junta lo que produjeron."""
 
-    def __init__(
-        self,
-        motor_memoria: MotorMemoria,
-        motor_calculo: MotorCalculo,
-    ) -> None:
-        self._motores = {
-            TipoIntencion.CONSULTAR_MEMORIA: motor_memoria.resolver,
-            TipoIntencion.CALCULAR: motor_calculo.resolver,
-        }
+    def __init__(self, registro: RegistroCapacidades) -> None:
+        self._registro = registro
 
-    async def despachar(self, interpretacion: Interpretacion) -> Respuesta:
-        """Resuelve todas las intenciones de un mensaje.
+    async def despachar(self, analisis: Analisis) -> Respuesta:
+        """Ejecuta todas las intenciones de un mensaje."""
+        if analisis.vacio:
+            return Respuesta(resueltos=(), analisis=analisis)
 
-        Se resuelven en paralelo: son independientes entre sí, y una consulta
-        lenta no debería retrasar a las demás.
-        """
-        if interpretacion.vacia:
-            return Respuesta(resueltos=(), interpretacion=interpretacion)
-
-        tareas = [
-            self._resolver_una(intencion)
-            for intencion in interpretacion.intenciones
-        ]
-        resueltos = await asyncio.gather(*tareas)
-
-        return Respuesta(
-            resueltos=tuple(resueltos),
-            interpretacion=interpretacion,
+        resueltos = await asyncio.gather(
+            *(self._ejecutar(i) for i in analisis.intenciones)
         )
+        return Respuesta(resueltos=tuple(resueltos), analisis=analisis)
 
     # ------------------------------------------------------------------
 
-    async def _resolver_una(self, intencion: Intencion) -> Resuelto:
-        motor = self._motores.get(intencion.tipo)
-
-        if motor is None:
-            # Conversar y fuera_de_alcance no necesitan motor: el resultado
-            # es la intención misma. Uno lo maneja el expresador, el otro
-            # es una respuesta honesta sobre un límite.
-            return Resuelto(intencion, self._sin_motor(intencion))
+    async def _ejecutar(self, intencion: Intencion) -> Resuelto:
+        if intencion.fuera_de_alcance:
+            return Resuelto(
+                intencion,
+                sin_alcance(
+                    str(intencion.parametros.get("que_falta", "esa capacidad"))
+                ),
+            )
 
         try:
             resultado = await asyncio.wait_for(
-                motor(intencion), timeout=TIMEOUT_MOTOR
+                self._registro.ejecutar(
+                    intencion.capacidad, intencion.parametros
+                ),
+                timeout=TIMEOUT_CAPACIDAD,
             )
         except TimeoutError:
             logger.warning(
-                "El motor de %s superó %ss.", intencion.tipo, TIMEOUT_MOTOR
+                "La capacidad %s superó %ss.",
+                intencion.capacidad, TIMEOUT_CAPACIDAD,
             )
             resultado = Resultado(
                 tipo=intencion.tipo,
                 procedencia=Procedencia.NINGUNA,
                 falta="resolver eso en un tiempo razonable",
             )
+        except ErrorCapacidad as exc:
+            logger.error("Capacidad %s: %s", intencion.capacidad, exc)
+            resultado = Resultado(
+                tipo=intencion.tipo,
+                procedencia=Procedencia.NINGUNA,
+                falta="resolver eso ahora",
+            )
         except Exception:
-            # Un motor que revienta no debe tumbar la respuesta entera: las
-            # demás intenciones del mensaje pueden haberse resuelto bien.
-            logger.exception("Fallo inesperado en el motor de %s.", intencion.tipo)
+            # Una capacidad que revienta no debe tumbar la respuesta entera:
+            # las demás intenciones del mensaje pueden haberse resuelto bien.
+            logger.exception(
+                "Fallo inesperado en la capacidad %s.", intencion.capacidad
+            )
             resultado = Resultado(
                 tipo=intencion.tipo,
                 procedencia=Procedencia.NINGUNA,
@@ -121,16 +114,3 @@ class Despachador:
             )
 
         return Resuelto(intencion, resultado)
-
-    @staticmethod
-    def _sin_motor(intencion: Intencion) -> Resultado:
-        if intencion.tipo == TipoIntencion.FUERA_DE_ALCANCE:
-            return sin_alcance(
-                str(intencion.parametros.get("que_falta", "esa capacidad"))
-            )
-
-        return Resultado(
-            tipo=TipoIntencion.CONVERSAR,
-            procedencia=Procedencia.NINGUNA,
-            datos=intencion.parametros,
-        )

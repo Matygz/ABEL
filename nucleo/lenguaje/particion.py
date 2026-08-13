@@ -72,18 +72,17 @@ _APERTURAS_INICIALES = re.compile(
 
 
 def _por_pregunta(texto: str) -> list[str]:
-    """Separa una pregunta del resto del mensaje.
-
-    Es la señal más confiable: un signo de interrogación marca un pedido
-    explícito, y lo que viene antes suele ser otra cosa.
-    """
+    """Separa una pregunta del resto del mensaje."""
     # Corta después de un cierre de interrogación o antes de una apertura.
     crudas = re.split(r"(?<=\?)\s+|\s+(?=¿)", texto)
 
-    # También separa una cláusula que termina en coma y sigue con pregunta.
+    # Y también cuando una afirmación termina en punto o coma y lo que sigue
+    # es una pregunta: "Me parece bien. ¿Cuánto es 11x11?" son dos cosas.
     if len(crudas) == 1 and "?" in texto:
-        coincidencia = re.search(r"^(.{%d,}?)[,;]\s+(.*\?)\s*$" % MINIMO_POR_PARTE,
-                                 texto, re.DOTALL)
+        coincidencia = re.search(
+            r"^(.{%d,}?)[.,;]\s+(.*\?)\s*$" % MINIMO_POR_PARTE,
+            texto, re.DOTALL,
+        )
         if coincidencia:
             crudas = [coincidencia.group(1), coincidencia.group(2)]
 

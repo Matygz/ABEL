@@ -17,16 +17,19 @@ from comun.eventos import BusEventos
 from nucleo.memoria.consultas import Memoria
 from nucleo.web.servidor import ServidorWeb
 from nucleo.web.sesiones import ServicioSesiones
-from nucleo.lenguaje.motor import MotorLenguaje
-from nucleo.lenguaje.servidor_modelo import ServidorModelo
+from nucleo.capacidades.registro import RegistroCapacidades
+from nucleo.lenguaje.analizador import Analizador
+from nucleo.lenguaje.clasificador import Clasificador
 from nucleo.lenguaje.contexto import ProveedorContexto
 from nucleo.lenguaje.conversacion import Conversacion
 from nucleo.lenguaje.expresador import Expresador
-from nucleo.lenguaje.interprete import Interprete
+from nucleo.lenguaje.extractor import Extractor
+from nucleo.lenguaje.indice import IndiceIntenciones
+from nucleo.lenguaje.motor import MotorLenguaje
+from nucleo.lenguaje.servidor_modelo import ServidorModelo
+from nucleo.lenguaje.vectorizador import Vectorizador
 from nucleo.razonamiento.criterio import Criterio
 from nucleo.razonamiento.despachador import Despachador
-from nucleo.razonamiento.motor_calculo import MotorCalculo
-from nucleo.razonamiento.motor_memoria import MotorMemoria
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +88,38 @@ async def main() -> None:
 
         conversacion = None
         if config.llm_ejecutable and config.llm_modelo:
+            registro = RegistroCapacidades({
+                "memoria": memoria,
+                "llm": motor,
+                "repositorio": repositorio,
+            })
+            registro.descubrir()
+
+            vectorizador = Vectorizador()
+            indice = IndiceIntenciones(vectorizador, url=config.qdrant_url)
+
+            # El índice se sincroniza al arrancar: si los ejemplos no
+            # cambiaron, no se re-vectoriza nada. Si Qdrant no responde, ABEL
+            # funciona igual — el analizador cae al modelo de lenguaje.
+            try:
+                await indice.sincronizar(registro)
+            except Exception as exc:
+                logger.warning(
+                    "Sin índice de intenciones: %s. "
+                    "El reconocimiento va a depender del modelo.", exc
+                )
+
             conversacion = Conversacion(
                 repositorio=repositorio,
                 modelo=modelo,
                 contexto=ProveedorContexto(repositorio),
-                interprete=Interprete(motor),
-                despachador=Despachador(
-                    MotorMemoria(memoria), MotorCalculo(motor)
+                analizador=Analizador(
+                    registro=registro,
+                    clasificador=Clasificador(indice),
+                    extractor=Extractor(motor),
+                    motor=motor,
                 ),
+                despachador=Despachador(registro),
                 criterio=Criterio(),
                 expresador=Expresador(motor),
             )

@@ -11,13 +11,15 @@ las reglas están escritas sobre qué aporta cada cosa, no sobre su forma.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 
-from nucleo.lenguaje.interprete import TipoIntencion
 from nucleo.razonamiento.despachador import Respuesta, Resuelto
 
 logger = logging.getLogger(__name__)
+
+# Por debajo de esto, una intención no conversacional no vale la pena.
+CONFIANZA_MINIMA = 0.35
 
 
 class Postura(Enum):
@@ -44,7 +46,9 @@ class Decision:
 class Criterio:
     """Filtra lo que ABEL va a decir."""
 
-    def decidir(self, respuesta: Respuesta, previos: list | None = None) -> Decision:
+    def decidir(
+        self, respuesta: Respuesta, previos: list | None = None
+    ) -> Decision:
         if not respuesta.resueltos:
             return Decision(Postura.CALLAR, motivo="nada que resolver")
 
@@ -55,13 +59,9 @@ class Criterio:
             )
 
         relevantes = self._filtrar(respuesta)
-        ...
 
         if not relevantes:
-            return Decision(
-                Postura.ACUSAR,
-                motivo="nada que aportar sobre eso",
-            )
+            return Decision(Postura.ACUSAR, motivo="nada que aportar sobre eso")
 
         return Decision(Postura.RESPONDER, resueltos=relevantes)
 
@@ -71,9 +71,6 @@ class Criterio:
         """Descarta lo que no vale la pena decir."""
         candidatos = list(respuesta.resueltos)
 
-        # Un desahogo domina el mensaje. Cuando alguien dice que está mal,
-        # contestarle con estadísticas de uso de aplicaciones es responder
-        # la pregunta literal e ignorar la real.
         desahogo = self._desahogo(candidatos)
         if desahogo is not None:
             return (desahogo,)
@@ -81,8 +78,7 @@ class Criterio:
         # Un límite se dice solo, sin acompañarlo de datos parciales que
         # parezcan una respuesta a medias.
         sin_alcance = [
-            r for r in candidatos
-            if r.intencion.tipo == TipoIntencion.FUERA_DE_ALCANCE
+            r for r in candidatos if r.intencion.tipo == "fuera_de_alcance"
         ]
         if sin_alcance:
             return (sin_alcance[0],)
@@ -103,7 +99,7 @@ class Criterio:
         if not previos or len(previos) < 2:
             return False
 
-        actual = respuesta.interpretacion.texto_original.strip().lower()
+        actual = respuesta.analisis.texto_original.strip().lower()
         if not actual:
             return False
 
@@ -119,7 +115,7 @@ class Criterio:
         respondio = bool((ultimo_abel.get("texto") or "").strip())
 
         return mismo and respondio
-    
+
     @staticmethod
     def _desahogo(candidatos: list[Resuelto]) -> Resuelto | None:
         """El desahogo domina, salvo que la persona haya pedido el dato.
@@ -133,7 +129,7 @@ class Criterio:
         """
         emocional = None
         for resuelto in candidatos:
-            if resuelto.intencion.tipo != TipoIntencion.CONVERSAR:
+            if resuelto.intencion.tipo != "conversar":
                 continue
             registro = resuelto.intencion.parametros.get("registro", "")
             if registro in ("desahogo", "malestar"):
@@ -146,8 +142,7 @@ class Criterio:
         # Si alguna otra intención vino de una parte propia del mensaje, la
         # persona la pidió: no se descarta.
         hay_pedido_explicito = any(
-            r is not emocional and r.intencion.explicita
-            for r in candidatos
+            r is not emocional and r.intencion.explicita for r in candidatos
         )
         return None if hay_pedido_explicito else emocional
 
@@ -156,14 +151,13 @@ class Criterio:
         """Si vale la pena mencionar este resultado."""
         intencion, resultado = resuelto.intencion, resuelto.resultado
 
-        # Una interpretación dudosa produce respuestas que no vienen al caso.
-        if intencion.tipo == TipoIntencion.CONVERSAR:
+        if intencion.tipo == "conversar":
             # Una conversación nunca se descarta por confianza: la confianza
             # mide qué tan claro está de qué clase de cosa es, y ante la duda
             # responder algo es mejor que callar.
             return True
 
-        if intencion.dudosa:
+        if intencion.confianza < CONFIANZA_MINIMA:
             logger.debug(
                 "Descartado por baja confianza: %s (%.2f)",
                 intencion.tipo, intencion.confianza,
