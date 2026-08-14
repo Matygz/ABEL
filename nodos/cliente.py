@@ -46,7 +46,8 @@ from nodos.sensores_ventana import construir_sensores_ventana
 logger = logging.getLogger(__name__)
 
 VERSION_CLIENTE = "0.0.1"
-ESPERA_RECONEXION = 5.0
+ESPERA_RECONEXION_MINIMA = 2.0
+ESPERA_RECONEXION_MAXIMA = 60.0
 
 
 class ClienteNodo:
@@ -95,26 +96,47 @@ class ClienteNodo:
         )
 
     async def ejecutar(self) -> None:
-        """Conecta y mantiene la sesión, reconectando ante cualquier corte."""
+        """Conecta y mantiene la sesión, reconectando ante cualquier corte.
+
+        El retroceso crece cuando la sesión no llega a establecerse y vuelve
+        al mínimo recién cuando funcionó. Sin eso, un saludo que falla en
+        seco produce reintentos inmediatos en bucle: el Núcleo abre una
+        conexión a la base por cada intento y las agota en segundos.
+        """
+        espera = ESPERA_RECONEXION_MINIMA
+
         async for ws in connect(
             self._config.servidor_url,
             ssl=self._contexto_tls,
-            open_timeout=10,
             ping_interval=20,
             ping_timeout=20,
         ):
+            establecida = False
             try:
+                await self._saludar(ws)
+                establecida = True
+                espera = ESPERA_RECONEXION_MINIMA
                 await self._sesion_completa(ws)
             except websockets.ConnectionClosed:
                 logger.warning(
-                    "Conexión perdida. Reintenta en %ss. Pendientes: %d",
-                    ESPERA_RECONEXION, len(self._cola),
+                    "Conexión perdida. Reintenta en %.0fs. Pendientes: %d",
+                    espera, len(self._cola),
                 )
             except ErrorProtocolo as exc:
                 logger.error("Error de protocolo: %s", exc.detalle)
+            except Exception as exc:
+                logger.error("Fallo en la sesión: %s", exc)
             finally:
                 self._sesion = None
-            await asyncio.sleep(ESPERA_RECONEXION)
+
+            if not establecida:
+                # El saludo no llegó a completarse: puede ser el Núcleo
+                # arrancando, la base todavía no disponible, o un rechazo.
+                # Insistir al instante empeora las tres cosas.
+                espera = min(espera * 2, ESPERA_RECONEXION_MAXIMA)
+                logger.info("Sin sesión. Próximo intento en %.0fs.", espera)
+
+            await self._dormir(espera)
 
     async def _sesion_completa(self, ws) -> None:
         """Saluda y mantiene la sesión.

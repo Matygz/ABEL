@@ -154,7 +154,7 @@ class Expresador:
         else:
             instrucciones = INSTRUCCIONES.format(usuario=usuario or "el usuario")
             entrada = historial + self._redactar_hechos(respuesta, decision)
-        logger.warning("ENTRADA: %r", entrada[:400])
+        logger.warning("ENTRADA:\n%s\n---FIN---", entrada)
         try:
             generada = await self._motor.generar(
                 instrucciones, entrada,
