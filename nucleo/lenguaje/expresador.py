@@ -144,9 +144,21 @@ class Expresador:
         resuelto = decision.resueltos[0]
         resultado = resuelto.resultado
 
+        resuelto = decision.resueltos[0]
+        resultado = resuelto.resultado
+
         if resuelto.intencion.tipo == "fuera_de_alcance":
             falta = resultado.falta or "esa capacidad"
             return f"No tengo {falta}."
+
+        # Enumerar capacidades no es redactar: es una lista, y el modelo la
+        # resume mal o directamente la ignora.
+        if resultado.tipo == "capacidades" and resultado.resuelto:
+            lineas = [
+                f"· {c['descripcion']}"
+                for c in resultado.datos.get("capacidades", [])
+            ]
+            return "Por ahora:\n" + "\n".join(lineas)
 
         if resultado.tipo != "calculo" or not resultado.resuelto:
             return None

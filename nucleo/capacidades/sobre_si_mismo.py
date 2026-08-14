@@ -35,6 +35,7 @@ async def resolver(parametros: dict, registro) -> Resultado:
     capacidades = [
         {"nombre": c.nombre, "descripcion": c.descripcion, "tipo": c.tipo}
         for c in registro.todas()
+        if c.nombre != NOMBRE
     ]
 
     return Resultado(
