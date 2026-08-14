@@ -225,6 +225,11 @@ class Analizador:
         No se le pide clasificar entre capacidades — para eso está el índice.
         Solo si esto es conversación o algo que ABEL no puede hacer.
         """
+        # Un mensaje de dos palabras no pide una capacidad: pedir algo que
+        # ABEL no puede hacer requiere decir qué. "Dale" es charla.
+        if len(mensaje.split()) <= 3:
+            return self._como_charla(Origen.RESPALDO)
+
         try:
             datos = await self._motor.generar_json(
                 INSTRUCCIONES_ULTIMO_RECURSO,

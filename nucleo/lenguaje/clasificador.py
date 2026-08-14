@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 # los aciertos daban 0.93+ y los ajenos 0.64-.
 UMBRAL = 0.72
 
+# Las frases muy cortas dan similitudes altas con poco contenido real:
+# "me parece bien" se parece a "estás funcionando bien" sin pedir nada. Se
+# les exige más.
+PALABRAS_MINIMAS = 3
+UMBRAL_FRASE_CORTA = 0.85
+
 # Cuántas coincidencias participan de la votación.
 VOTANTES = 5
 
@@ -54,6 +60,21 @@ class Clasificador:
         self._umbral = umbral
         self._votantes = votantes
 
+    def _umbral_para(self, mensaje: str) -> float:
+        """Umbral según cuánto contenido tiene el mensaje.
+
+        Una frase de tres palabras da similitudes altas sin decir mucho:
+        "me parece bien" cae cerca de "estás funcionando bien" aunque no
+        pida nada. Se le exige más para reconocerla.
+
+        Los saludos son la excepción: son cortos por naturaleza y están bien
+        cubiertos por los ejemplos de conversación.
+        """
+        palabras = len(mensaje.split())
+        if palabras >= PALABRAS_MINIMAS:
+            return self._umbral
+        return UMBRAL_FRASE_CORTA
+    
     async def clasificar(self, mensaje: str) -> Clasificacion:
         """Devuelve la capacidad que mejor corresponde, o ninguna."""
         mensaje = mensaje.strip()
@@ -72,11 +93,12 @@ class Clasificador:
             return Clasificacion(None, None, 0.0)
 
         mejor = coincidencias[0]
+        umbral = self._umbral_para(mensaje)
 
-        if mejor.similitud < self._umbral:
+        if mejor.similitud < umbral:
             logger.debug(
-                "Nada supera el umbral: mejor %.3f (%s)",
-                mejor.similitud, mejor.capacidad,
+                "Nada supera el umbral (%.2f): mejor %.3f (%s)",
+                umbral, mejor.similitud, mejor.capacidad,
             )
             return Clasificacion(
                 None, None, mejor.similitud, tuple(coincidencias)
