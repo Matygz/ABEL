@@ -67,6 +67,7 @@ class ClienteNodo:
             self._registro.registrar(sensor)
         self._emitir = crear_emisor(self._cola)
         self._planificador = Planificador()
+        self._conexion_estable = False
 
     @staticmethod
     def _construir_contexto_tls(certificado: str) -> ssl.SSLContext:
@@ -99,9 +100,9 @@ class ClienteNodo:
         """Conecta y mantiene la sesión, reconectando ante cualquier corte.
 
         El retroceso crece cuando la sesión no llega a establecerse y vuelve
-        al mínimo recién cuando funcionó. Sin eso, un saludo que falla en
-        seco produce reintentos inmediatos en bucle: el Núcleo abre una
-        conexión a la base por cada intento y las agota en segundos.
+        al mínimo recién cuando el saludo funcionó. Sin eso, un saludo que
+        falla en seco produce reintentos inmediatos en bucle: el Núcleo abre
+        una conexión a la base por cada intento y las agota en segundos.
         """
         espera = ESPERA_RECONEXION_MINIMA
 
@@ -111,16 +112,12 @@ class ClienteNodo:
             ping_interval=20,
             ping_timeout=20,
         ):
-            establecida = False
+            self._conexion_estable = False
             try:
-                await self._saludar(ws)
-                establecida = True
-                espera = ESPERA_RECONEXION_MINIMA
                 await self._sesion_completa(ws)
             except websockets.ConnectionClosed:
                 logger.warning(
-                    "Conexión perdida. Reintenta en %.0fs. Pendientes: %d",
-                    espera, len(self._cola),
+                    "Conexión perdida. Pendientes: %d", len(self._cola)
                 )
             except ErrorProtocolo as exc:
                 logger.error("Error de protocolo: %s", exc.detalle)
@@ -129,7 +126,9 @@ class ClienteNodo:
             finally:
                 self._sesion = None
 
-            if not establecida:
+            if self._conexion_estable:
+                espera = ESPERA_RECONEXION_MINIMA
+            else:
                 # El saludo no llegó a completarse: puede ser el Núcleo
                 # arrancando, la base todavía no disponible, o un rechazo.
                 # Insistir al instante empeora las tres cosas.
@@ -145,6 +144,9 @@ class ClienteNodo:
         el Núcleo envíe por su cuenta.
         """
         await self._saludar(ws)
+
+        # El saludo salió bien: la próxima reconexión no necesita esperar.
+        self._conexion_estable = True
 
         await asyncio.gather(
             self._bucle_de_envio(ws),
