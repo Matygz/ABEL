@@ -119,7 +119,9 @@ class Analizador:
 
         intenciones: list[Intencion] = []
         for parte in partes:
-            intencion = await self._analizar_parte(parte, contexto, explicitas)
+            intencion = await self._analizar_parte(
+                parte, mensaje, contexto, explicitas
+            )
             if intencion is not None:
                 intenciones.append(intencion)
 
@@ -140,24 +142,31 @@ class Analizador:
         return Analisis(tuple(unicas), texto_original=mensaje)
 
     async def _analizar_parte(
-        self, parte: str, contexto: ContextoABEL, explicita: bool
+        self,
+        parte: str,
+        completo: str,
+        contexto: ContextoABEL,
+        explicita: bool,
     ) -> Intencion | None:
-        """Aplica la cascada a una parte del mensaje."""
+        """Aplica la cascada a una parte del mensaje.
+
+        La clasificación usa la parte; la extracción, el mensaje entero. Un
+        parámetro puede estar en cualquier lado: "estoy quemado de Code,
+        ¿cuánto estuve?" nombra la aplicación en la primera mitad y pregunta
+        en la segunda.
+        """
         directo = self._por_patron(parte)
         if directo is not None:
             return directo
 
-        por_similitud = await self._por_similitud(parte, contexto, explicita)
+        por_similitud = await self._por_similitud(
+            parte, completo, contexto, explicita
+        )
         if por_similitud is not None:
             return por_similitud
 
-        # Una parte que no se reconoce solo va al modelo si es el mensaje
-        # entero: partes sueltas sin reconocer se descartan, porque el resto
-        # del mensaje ya aporta algo.
         return None
-
-    # ------------------------------------------------------------------
-
+    
     def _por_patron(self, mensaje: str) -> Intencion | None:
         """Primera capa: lo que se reconoce sin ningún modelo."""
         reconocido = patrones.reconocer(mensaje)
@@ -176,12 +185,16 @@ class Analizador:
             parametros={"enunciado": parametros["enunciado"]},
             origen=Origen.PATRON,
         )
-
+    
     async def _por_similitud(
-        self, mensaje: str, contexto: ContextoABEL, explicita: bool = True
+        self,
+        parte: str,
+        completo: str,
+        contexto: ContextoABEL,
+        explicita: bool = True,
     ) -> Intencion | None:
         """Segunda capa: comparación contra ejemplos conocidos."""
-        clasificacion = await self._clasificador.clasificar(mensaje)
+        clasificacion = await self._clasificador.clasificar(parte)
         if not clasificacion.reconocido:
             return None
 
@@ -194,7 +207,7 @@ class Analizador:
             return None
 
         parametros = await self._extractor.extraer(
-            mensaje, capacidad, contexto.aplicaciones
+            completo, capacidad, contexto.aplicaciones
         )
 
         return Intencion(
