@@ -40,8 +40,8 @@ CON_NUCLEO = [
 # Necesitan el modelo de lenguaje.
 CON_MODELO = [
     "test_calculo",
-    "test_interprete",
-    "test_criterio",
+    "test_clasificador",
+    "test_conversacion",
 ]
 
 

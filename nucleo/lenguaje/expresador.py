@@ -130,14 +130,24 @@ class Expresador:
     def _respuesta_directa(decision: Decision) -> str | None:
         """Respuestas que no pasan por el modelo.
 
-        Cuando el resultado es un número exacto y es lo único que hay, el
-        dato es la respuesta. Dejarlo redactar solo agrega riesgo de que
-        transcriba mal la cifra.
+        Dos casos donde redactar solo agrega riesgo:
+
+        - Un cálculo exacto: el número es la respuesta, y un modelo chico
+          transcribiendo cifras se equivoca.
+        - Un límite: se lo vio responder "la luz del living prendió" ante un
+          fuera_de_alcance. Afirmar haber hecho algo que no se hizo es el
+          peor fallo posible.
         """
         if len(decision.resueltos) != 1:
             return None
 
-        resultado = decision.resueltos[0].resultado
+        resuelto = decision.resueltos[0]
+        resultado = resuelto.resultado
+
+        if resuelto.intencion.tipo == "fuera_de_alcance":
+            falta = resultado.falta or "esa capacidad"
+            return f"No tengo {falta}."
+
         if resultado.tipo != "calculo" or not resultado.resuelto:
             return None
 
