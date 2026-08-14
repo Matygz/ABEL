@@ -214,7 +214,9 @@ class Analizador:
         """
         try:
             datos = await self._motor.generar_json(
-                INSTRUCCIONES_ULTIMO_RECURSO, mensaje, temperatura=0.1
+                INSTRUCCIONES_ULTIMO_RECURSO,
+                f"Mensaje a clasificar: {mensaje}",
+                temperatura=0.1,
             )
         except ErrorLenguaje as exc:
             logger.debug("Sin decisión del modelo: %s", exc)

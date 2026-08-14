@@ -86,6 +86,9 @@ No sos un asistente. No estás para ayudar: estás.
 Esto es una conversación. {usuario} te escribió y le contestás. No hay datos
 que consultar ni hechos que enunciar.
 
+Si en lo que venían hablando hay números o datos, NO los repitas ahora. Eso
+ya lo dijiste y era respuesta a otra cosa.
+
 CÓMO HABLÁS:
 
 - Le hablás a {usuario} de vos: "te", "vos". Nunca lo nombrás en tercera
@@ -123,7 +126,30 @@ class Expresador:
         self._motor = motor
 
     # ------------------------------------------------------------------
+    @staticmethod
+    def _respuesta_directa(decision: Decision) -> str | None:
+        """Respuestas que no pasan por el modelo.
 
+        Cuando el resultado es un número exacto y es lo único que hay, el
+        dato es la respuesta. Dejarlo redactar solo agrega riesgo de que
+        transcriba mal la cifra.
+        """
+        if len(decision.resueltos) != 1:
+            return None
+
+        resultado = decision.resueltos[0].resultado
+        if resultado.tipo != "calculo" or not resultado.resuelto:
+            return None
+
+        d = resultado.datos
+        if "valor" in d:
+            valor = d["valor"]
+            if isinstance(valor, float) and valor.is_integer():
+                valor = int(valor)
+            return f"{valor}."
+
+        return None
+    
     async def expresar(
         self,
         respuesta: Respuesta,
@@ -136,21 +162,36 @@ class Expresador:
         Devuelve cadena vacía cuando ABEL no tiene nada que decir. El silencio
         es una respuesta válida: la interfaz lo señala con un gesto, no con
         una frase de relleno.
-        """
+        """    
         if not decision.habla:
             return ""
+
+        # Un cálculo exacto no necesita redacción: el número es la respuesta.
+        # Y un modelo chico transcribiendo cifras es un riesgo que no vale
+        # correr — se lo vio escribir "cincuenta y dos" ante 121.
+        directo = self._respuesta_directa(decision)
+        if directo is not None:
+            return directo
 
         solo_conversacion = all(
             r.intencion.tipo == "conversar" for r in decision.resueltos
         )
 
-        historial = self._redactar_historial(previos)
+        # Con un mensaje corto y sin datos, el historial solo aporta material
+        # para rellenar: un modelo chico ante "hola" y un "121." dos líneas
+        # arriba responde 121. Lo que no tiene con qué rellenar, no rellena.
+        mensaje = respuesta.analisis.texto_original
+        historial = (
+            ""
+            if solo_conversacion and len(mensaje) < 25
+            else self._redactar_historial(previos, solo_conversacion)
+        )
 
         if solo_conversacion:
             instrucciones = INSTRUCCIONES_CONVERSACION.format(
                 usuario=usuario or "el usuario"
             )
-            entrada = historial + respuesta.analisis.texto_original
+            entrada = historial + mensaje
         else:
             instrucciones = INSTRUCCIONES.format(usuario=usuario or "el usuario")
             entrada = historial + self._redactar_hechos(respuesta, decision)
@@ -158,7 +199,7 @@ class Expresador:
         try:
             generada = await self._motor.generar(
                 instrucciones, entrada,
-                temperatura=0.85 if solo_conversacion else 0.4,
+                temperatura=0.85 if solo_conversacion else 0.2,
                 max_tokens=300,
             )
             return generada.texto
@@ -191,8 +232,7 @@ class Expresador:
 
         if con_datos:
             partes.append(
-                "\nHECHOS (son sobre él, no sobre vos — decí 'estuviste', "
-                "nunca 'estuve'):"
+                "\nHECHOS (los datos son sobre él; hablale en segunda persona):"
             )
             for resuelto in con_datos:
                 bloque = self._describir(resuelto)
@@ -303,17 +343,23 @@ class Expresador:
         return f"actividad total {tiempo(d['total_segundos'])}. Detalle: {detalle}"
 
     @staticmethod
-    def _redactar_historial(previos: list | None) -> str:
+    def _redactar_historial(
+        previos: list | None, solo_conversacion: bool = False
+    ) -> str:
         """Formatea los turnos anteriores como conversación.
 
         Un turno vacío de ABEL fue un silencio deliberado. Se marca, porque
         callar dos veces seguidas ante lo mismo no es lo mismo que callar una.
 
-        Se escribe desde el punto de vista del modelo —"vos" es ABEL— para que
-        no se confunda de rol al leer sus propios turnos anteriores.
+        Cuando el turno actual es charla sin datos, el historial se acorta:
+        un modelo chico ante un "hola" suelto y un "121." tres líneas arriba
+        agarra el 121. Lo que no tiene con qué rellenar, no rellena.
         """
         if not previos:
             return ""
+
+        if solo_conversacion:
+            previos = previos[-4:]
 
         lineas = ["Lo que venían hablando:\n"]
         for turno in previos:
