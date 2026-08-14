@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 import webbrowser
+import os
 from pathlib import Path
 
 import pystray
@@ -30,6 +31,12 @@ URL_INTERFAZ = "http://127.0.0.1:8080"
 
 SIN_VENTANA = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
+def logger_print(mensaje: str) -> None:
+    """Mensaje a consola si la hay. Con pythonw no hay, y no importa."""
+    try:
+        print(mensaje, flush=True)
+    except Exception:
+        pass
 
 class Abel:
     """Supervisa los procesos de ABEL y ofrece el menú de bandeja."""
@@ -51,11 +58,94 @@ class Abel:
             creationflags=SIN_VENTANA,
         )
 
+    def _matar_huerfanos(self) -> None:
+        """Termina procesos de ABEL que hayan quedado de una sesión anterior.
+
+        Un Nodo huérfano compite con el nuevo: los dos se conectan, los dos
+        abren conexiones a la base, y se agotan. Pasó.
+
+        Solo mata Núcleos y Nodos, nunca otros lanzadores: matar un `abel.py`
+        incluiría al proceso actual y a su padre.
+        """
+        try:
+            import psutil
+        except ImportError:
+            return
+
+        propio = os.getpid()
+        try:
+            padre = psutil.Process(propio).ppid()
+        except psutil.Error:
+            padre = -1
+
+        for proceso in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                if proceso.info["pid"] in (propio, padre):
+                    continue
+
+                nombre = (proceso.info["name"] or "").lower()
+                if not nombre.startswith("python"):
+                    continue
+
+                argumentos = proceso.info["cmdline"] or []
+                # Solo los módulos: `python -m nucleo`, `python -m nodos`.
+                if "-m" not in argumentos:
+                    continue
+                if not any(a in ("nucleo", "nodos") for a in argumentos):
+                    continue
+
+                logger_print(f"Terminando proceso huérfano: {proceso.info['pid']}")
+                proceso.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+    def _esperar_base(self, limite: float = 120.0) -> bool:
+        """Espera a que PostgreSQL acepte conexiones.
+
+        Docker arranca en paralelo con la sesión del usuario y puede tardar
+        más. El Núcleo no arranca sin base —falla en la primera consulta— así
+        que esperar acá evita un arranque fallido.
+        """
+        import socket
+
+        limite_tiempo = time.monotonic() + limite
+        while time.monotonic() < limite_tiempo:
+            if self._detener.is_set():
+                return False
+            with socket.socket() as s:
+                s.settimeout(2.0)
+                if s.connect_ex(("127.0.0.1", 5432)) == 0:
+                    return True
+            time.sleep(2.0)
+
+        logger_print("La base no respondió. ABEL arranca igual y reintenta.")
+        return False
+
+    def _esperar_nucleo(self, limite: float = 90.0) -> bool:
+        """Espera a que el Núcleo escuche en su puerto.
+
+        El Núcleo carga el modelo de embeddings al arrancar, y eso tarda unos
+        segundos. Lanzar el Nodo antes solo produce reintentos en el log.
+        """
+        import socket
+
+        limite_tiempo = time.monotonic() + limite
+        while time.monotonic() < limite_tiempo:
+            if self._detener.is_set():
+                return False
+            with socket.socket() as s:
+                s.settimeout(2.0)
+                if s.connect_ex(("127.0.0.1", 8765)) == 0:
+                    return True
+            time.sleep(1.0)
+        return False
+
     def arrancar(self) -> None:
+        self._matar_huerfanos()
+        self._esperar_base()
+
         self._nucleo = self._lanzar("nucleo")
-        # El Nodo espera un poco: si arranca antes que el servidor esté
-        # escuchando, reintenta igual, pero así se evita ruido en el log.
-        time.sleep(3)
+        self._esperar_nucleo()
         self._nodo = self._lanzar("nodos")
 
     def _vivo(self, proceso: subprocess.Popen[bytes] | None) -> bool:
@@ -65,14 +155,15 @@ class Abel:
         """Reinicia lo que se caiga. Corre en un hilo aparte."""
         while not self._detener.wait(10.0):
             if not self._vivo(self._nucleo):
+                logger_print("El Núcleo se cayó. Reiniciando.")
+                if self._vivo(self._nodo):
+                    self._nodo.terminate()
                 self._nucleo = self._lanzar("nucleo")
-                time.sleep(3)
+                self._esperar_nucleo()
                 self._nodo = self._lanzar("nodos")
             elif not self._vivo(self._nodo):
+                logger_print("El Nodo se cayó. Reiniciando.")
                 self._nodo = self._lanzar("nodos")
-
-            if self._icono is not None:
-                self._icono.icon = self._dibujar_icono(activo=True)
 
     def detener(self) -> None:
         self._detener.set()
@@ -80,7 +171,7 @@ class Abel:
             if self._vivo(proceso):
                 proceso.terminate()
                 try:
-                    proceso.wait(timeout=10)
+                    proceso.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     proceso.kill()
 
