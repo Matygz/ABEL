@@ -23,6 +23,7 @@ AISLADAS = [
     "test_firma",
     "test_patrones",
     "test_bus",
+    "ttest_sangre",
 ]
 
 # Necesitan PostgreSQL.

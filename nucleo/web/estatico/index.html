@@ -313,16 +313,17 @@
 <script type="module">
 import * as THREE from "three";
 
-/* ==================================================================
-   La forma
-   ================================================================== */
+/* --- La forma ------------------------------------------------------ */
+/* --- Three.js ------------------------------------------------------ */
 
 const lienzo = document.getElementById("escena");
-const escena = new THREE.Scene();
-escena.fog = new THREE.FogExp2(0x05070a, 0.11);
 
-const camara = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
-camara.position.z = 7.2;
+const escena = new THREE.Scene();
+
+const camara = new THREE.PerspectiveCamera(
+  38, innerWidth / innerHeight, 0.1, 100
+);
+camara.position.z = 5.2;
 
 const render = new THREE.WebGLRenderer({
   canvas: lienzo, antialias: true, alpha: true,
@@ -330,53 +331,171 @@ const render = new THREE.WebGLRenderer({
 render.setPixelRatio(Math.min(devicePixelRatio, 2));
 render.setSize(innerWidth, innerHeight);
 
-// El núcleo: icosaedro geodésico. Subdivisión 2 en vez de 3 — con 3 la
-// malla se vuelve tan densa que se lee como esfera y pierde la geometría.
-const nucleo = new THREE.Group();
-escena.add(nucleo);
+addEventListener("resize", () => {
+  camara.aspect = innerWidth / innerHeight;
+  camara.updateProjectionMatrix();
+  render.setSize(innerWidth, innerHeight);
+});
 
-const geometria = new THREE.IcosahedronGeometry(1.55, 2);
+const RADIO = 1.55;
+const SUBDIVISION = 2;
 
-const aristas = new THREE.LineSegments(
-  new THREE.EdgesGeometry(geometria, 1),
-  new THREE.LineBasicMaterial({
-    color: 0x4fd1e0, transparent: true, opacity: 0.5,
-  })
-);
-nucleo.add(aristas);
+// Qué porción del frente se aplana. Más grande, cara más ancha.
+const APERTURA = Math.PI / 4.5;
 
-// Una segunda capa apenas mayor, más tenue: da profundidad sin bloom.
-const halo = new THREE.LineSegments(
-  new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(1.62, 2), 1),
-  new THREE.LineBasicMaterial({
-    color: 0x4fd1e0, transparent: true, opacity: 0.09,
-  })
-);
-nucleo.add(halo);
+function geometriaAplanada(radio, subdivision, apertura) {
+  const g = new THREE.IcosahedronGeometry(radio, subdivision);
+  const posicion = g.getAttribute("position");
 
-// Textura circular para los puntos: PointsMaterial dibuja cuadrados por
-// defecto, y a este tamaño se nota.
-function texturaPunto() {
-  const lienzo = document.createElement("canvas");
-  lienzo.width = lienzo.height = 64;
-  const ctx = lienzo.getContext("2d");
-  const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0,   "rgba(255,255,255,1)");
-  grad.addColorStop(0.4, "rgba(255,255,255,.6)");
-  grad.addColorStop(1,   "rgba(255,255,255,0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 64, 64);
-  return new THREE.CanvasTexture(lienzo);
+  const planoZ = radio * Math.cos(apertura);
+
+  // La cara: los vértices del frente se proyectan sobre un plano.
+  for (let i = 0; i < posicion.count; i++) {
+    const x = posicion.getX(i);
+    const y = posicion.getY(i);
+    const z = posicion.getZ(i);
+
+    const angulo = Math.acos(z / Math.hypot(x, y, z));
+    if (angulo >= apertura) continue;
+
+    posicion.setZ(i, planoZ);
+  }
+
+  // Los polos también se aplanan: un icosaedro subdividido termina en
+  // punta arriba y abajo, y esas puntas quedan raras al lado de una cara
+  // recortada.
+  const aperturaPolo = Math.PI / 9;
+  const planoY = radio * Math.cos(aperturaPolo);
+
+  for (let i = 0; i < posicion.count; i++) {
+    const x = posicion.getX(i);
+    const y = posicion.getY(i);
+    const z = posicion.getZ(i);
+    const largo = Math.hypot(x, y, z);
+
+    const desdeArriba = Math.acos(y / largo);
+    if (desdeArriba < aperturaPolo) { posicion.setY(i, planoY); continue; }
+
+    const desdeAbajo = Math.acos(-y / largo);
+    if (desdeAbajo < aperturaPolo) posicion.setY(i, -planoY);
+  }
+
+  posicion.needsUpdate = true;
+  g.computeVertexNormals();
+  return g;
 }
 
-const PUNTO = texturaPunto();
+const geometria = geometriaAplanada(RADIO, SUBDIVISION, APERTURA);
+
+// Cáscara casi opaca: sin esto, las aristas traseras se cruzan con los ojos
+// y la lectura se vuelve confusa. El color es apenas más claro que el fondo
+// para que se lea como cáscara y no como objeto sólido.
+const cascara = new THREE.Mesh(
+  geometria,
+  new THREE.MeshBasicMaterial({
+    color: 0x1a4a52,
+    transparent: true,
+    opacity: 0.35,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+);
+
+// El wireframe sin las aristas de la cara: en el plano frontal se ven como
+// rayones sobre lo que debería ser una superficie lisa.
+function aristasSinCara(geo, planoZ) {
+  const wire = new THREE.WireframeGeometry(geo);
+  const pos = wire.getAttribute("position");
+  const conservadas = [];
+  const margen = 0.001;
+
+  // Un vértice fue aplanado si su Z es exactamente el del plano. No hace
+  // falta comparar radios: el recorte sigue los triángulos del icosaedro
+  // y no es circular, así que ningún radio único calza bien.
+  const aplanado = z => Math.abs(z - planoZ) < margen;
+
+  for (let i = 0; i < pos.count; i += 2) {
+    if (aplanado(pos.getZ(i)) && aplanado(pos.getZ(i + 1))) continue;
+
+    for (let v = 0; v < 2; v++) {
+      conservadas.push(pos.getX(i + v), pos.getY(i + v), pos.getZ(i + v));
+    }
+  }
+
+  const limpia = new THREE.BufferGeometry();
+  limpia.setAttribute(
+    "position", new THREE.Float32BufferAttribute(conservadas, 3)
+  );
+  return limpia;
+}
+
+const aristas = new THREE.LineSegments(
+  aristasSinCara(geometria, RADIO * Math.cos(APERTURA)),
+  new THREE.LineBasicMaterial({
+    color: 0x2b8f9e, transparent: true, opacity: 0.55,
+  })
+);
+
+const nucleo = new THREE.Group();
+nucleo.add(cascara);
+nucleo.add(aristas);
+// La zona de los ojos, un poco más clara que el resto: marca dónde mira
+// sin necesidad de un borde dibujado.
+// La zona de los ojos: sigue el contorno real del recorte, no un círculo.
+// Se arma con los vértices que quedaron sobre el plano.
+function discoDeLaCara(geo, planoZ, radioPlano) {
+  const pos = geo.getAttribute("position");
+  const enBorde = [];
+  const vistos = new Set();
+
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    if (z < planoZ - 0.01) continue;
+
+    const r = Math.hypot(x, y);
+    if (r < radioPlano * 0.7) continue;   // solo el anillo exterior
+
+    const clave = `${x.toFixed(3)},${y.toFixed(3)}`;
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    enBorde.push({ x, y, a: Math.atan2(y, x) });
+  }
+
+  enBorde.sort((p, q) => p.a - q.a);
+
+  const forma = new THREE.Shape();
+  enBorde.forEach((p, i) => {
+    if (i === 0) forma.moveTo(p.x, p.y);
+    else forma.lineTo(p.x, p.y);
+  });
+  forma.closePath();
+
+  return new THREE.ShapeGeometry(forma);
+}
+
+const zonaCara = new THREE.Mesh(
+  discoDeLaCara(
+    geometria,
+    RADIO * Math.cos(APERTURA),
+    RADIO * Math.sin(APERTURA)
+  ),
+  new THREE.MeshBasicMaterial({
+    color: 0x2d6b74,
+    transparent: true,
+    opacity: 0.3,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+);
+zonaCara.position.z = RADIO * Math.cos(APERTURA) + 0.005;
+nucleo.add(zonaCara);
+escena.add(nucleo);
+
 // Vértices como puntos: la estructura se lee incluso cuando las
 // aristas se atenúan.
 // Vértices como esferas reales. Los Points con textura dependen de cómo el
 // navegador resuelve el sprite; una geometría instanciada es predecible.
-const posVertices = new THREE.IcosahedronGeometry(1.55, 2)
-  .getAttribute("position");
-
+const posVertices = geometria.getAttribute("position");
 const esfera = new THREE.SphereGeometry(0.008, 8, 8);
 const materialVertice = new THREE.MeshBasicMaterial({
   color: 0x9fe8f0, transparent: true, opacity: 0.65,
@@ -387,18 +506,26 @@ const vertices = new THREE.InstancedMesh(
 );
 
 const auxiliar = new THREE.Object3D();
+const planoZ = RADIO * Math.cos(APERTURA);
+const radioPlano = RADIO * Math.sin(APERTURA);
+
+// Los vértices que quedaron sobre la cara no se dibujan: es una superficie
+// lisa, no una malla.
+const enLaCara = i => Math.abs(posVertices.getZ(i) - planoZ) < 0.001;
+let colocados = 0;
 for (let i = 0; i < posVertices.count; i++) {
+  if (enLaCara(i)) continue;
   auxiliar.position.set(
     posVertices.getX(i), posVertices.getY(i), posVertices.getZ(i)
   );
   auxiliar.updateMatrix();
-  vertices.setMatrixAt(i, auxiliar.matrix);
+  vertices.setMatrixAt(colocados, auxiliar.matrix);
+  colocados++;
 }
+vertices.count = colocados;
 vertices.instanceMatrix.needsUpdate = true;
 nucleo.add(vertices);
 
-// Halo de los vértices: una segunda capa más grande y tenue. Sumada por
-// AdditiveBlending da el resplandor sin el costo del post-procesado.
 // Halo de los vértices: esferas mayores y tenues, sumadas por
 // AdditiveBlending. Da el resplandor sin post-procesado.
 const auraVertices = new THREE.InstancedMesh(
@@ -410,15 +537,82 @@ const auraVertices = new THREE.InstancedMesh(
   posVertices.count
 );
 
+let colocadosAura = 0;
 for (let i = 0; i < posVertices.count; i++) {
+  if (enLaCara(i)) continue;
   auxiliar.position.set(
     posVertices.getX(i), posVertices.getY(i), posVertices.getZ(i)
   );
   auxiliar.updateMatrix();
-  auraVertices.setMatrixAt(i, auxiliar.matrix);
+  auraVertices.setMatrixAt(colocadosAura, auxiliar.matrix);
+  colocadosAura++;
 }
+auraVertices.count = colocadosAura;
 auraVertices.instanceMatrix.needsUpdate = true;
 nucleo.add(auraVertices);
+/* --- Los ojos ------------------------------------------------------ */
+
+// Dos anillos en el hueco frontal. Se orientan con la forma pero no giran
+// con ella: siempre miran hacia adelante, hacia quien esté del otro lado.
+function formaOvalada(ancho, alto, radio) {
+  const forma = new THREE.Shape();
+  const a = ancho / 2, b = alto / 2, r = Math.min(radio, a, b);
+
+  forma.moveTo(-a + r, -b);
+  forma.lineTo(a - r, -b);
+  forma.quadraticCurveTo(a, -b, a, -b + r);
+  forma.lineTo(a, b - r);
+  forma.quadraticCurveTo(a, b, a - r, b);
+  forma.lineTo(-a + r, b);
+  forma.quadraticCurveTo(-a, b, -a, b - r);
+  forma.lineTo(-a, -b + r);
+  forma.quadraticCurveTo(-a, -b, -a + r, -b);
+
+  return forma;
+}
+
+function crearOjo(x) {
+  const grupo = new THREE.Group();
+
+  // Una barra horizontal, no un círculo: un anillo redondo se lee como
+  // ojo de dibujo animado. Esto es más cerca de un visor.
+  const barra = new THREE.Mesh(
+    new THREE.ShapeGeometry(formaOvalada(0.15, 0.27, 0.065), 12),
+    new THREE.MeshBasicMaterial({
+      color: 0xd8f4f8, transparent: true, opacity: 1,
+      side: THREE.DoubleSide, depthWrite: false,
+    })
+  );
+  grupo.add(barra);
+
+  const halo = new THREE.Mesh(
+    new THREE.ShapeGeometry(formaOvalada(0.26, 0.4, 0.11), 12),
+    new THREE.MeshBasicMaterial({
+      color: 0x4fd1e0, transparent: true, opacity: 0.12,
+      side: THREE.DoubleSide, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+  );
+  grupo.add(halo);
+
+  grupo.position.set(x, 0.04, RADIO * Math.cos(APERTURA) + 0.01);
+  grupo.userData = { anillo: barra, halo, base: grupo.position.clone() };
+  return grupo;
+}
+
+const ojoIzq = crearOjo(-0.26);
+const ojoDer = crearOjo(0.26);
+
+// Los ojos van en su propio grupo, fuera de la rotación del núcleo: la
+// forma se orienta, los ojos miran. Si rotaran con ella se irían de vista.
+const mirada = new THREE.Group();
+mirada.add(ojoIzq);
+mirada.add(ojoDer);
+nucleo.add(mirada);
+
+// Parpadeo: irregular a propósito. Un ritmo fijo se lee como máquina.
+let proximoParpadeo = 2 + Math.random() * 4;
+let parpadeo = 0;
 
 // Polvo alrededor. Muy poco y muy tenue: sugiere espacio, no lo llena.
 const cantidadPolvo = 400;
@@ -436,16 +630,17 @@ geometriaPolvo.setAttribute("position", new THREE.BufferAttribute(posiciones, 3)
 const polvo = new THREE.Points(
   geometriaPolvo,
   new THREE.PointsMaterial({
-    color: 0x6b7a8a, size: 0.07, transparent: true, opacity: 0.75,
-    map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
+    color: 0x6b7a8a, size: 0.035, transparent: true, opacity: 0.55,
+    depthWrite: false, blending: THREE.AdditiveBlending,
   })
 );
 escena.add(polvo);
+
 const auraPolvo = new THREE.Points(
   geometriaPolvo,
   new THREE.PointsMaterial({
-    color: 0x4fd1e0, size: 0.13, transparent: true, opacity: 0.18,
-    map: PUNTO, depthWrite: false, blending: THREE.AdditiveBlending,
+    color: 0x4fd1e0, size: 0.06, transparent: true, opacity: 0.12,
+    depthWrite: false, blending: THREE.AdditiveBlending,
   })
 );
 escena.add(auraPolvo);
@@ -471,12 +666,6 @@ addEventListener("pointermove", e => {
   atencion.objetivoX = ((e.clientY / innerHeight) - 0.5) * 0.5;
   atencion.objetivoY = ((e.clientX / innerWidth) - 0.5) * 0.9;
   estado.quietud = 0;
-});
-
-addEventListener("resize", () => {
-  camara.aspect = innerWidth / innerHeight;
-  camara.updateProjectionMatrix();
-  render.setSize(innerWidth, innerHeight);
 });
 
 function latir() { estado.latido = 1; }
@@ -531,12 +720,28 @@ function animar() {
   const base = estado.activo ? 0.5 : 0.22;
   aristas.material.opacity = base + estado.latido * 0.3 + estado.sobresalto * 0.35;
   vertices.material.opacity = 0.7 + estado.sobresalto * 0.3;
-  halo.material.opacity = 0.09 + estado.latido * 0.12;
 
   polvo.rotation.y = t * 0.006;
   polvo.rotation.x = t * 0.003;
   auraPolvo.rotation.copy(polvo.rotation);
   auraVertices.material.opacity = 0.28 + estado.latido * 0.25 + estado.sobresalto * 0.3;
+
+  // Parpadeo irregular.
+  proximoParpadeo -= dt;
+  if (proximoParpadeo <= 0) {
+    parpadeo = 1;
+    proximoParpadeo = 2.5 + Math.random() * 5;
+  }
+  parpadeo = Math.max(0, parpadeo - dt * 7);
+
+  const abierto = 1 - parpadeo;
+  for (const ojo of [ojoIzq, ojoDer]) {
+    ojo.scale.y = 0.15 + abierto * 0.85;
+    ojo.userData.anillo.material.opacity =
+      0.8 + estado.latido * 0.2 + estado.sobresalto * 0.2;
+    ojo.userData.halo.material.opacity =
+      0.08 + estado.latido * 0.18 + estado.sobresalto * 0.2;
+  }
   render.render(escena, camara);
 }
 animar();
