@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+from pathlib import Path
 
+from comun.sangre import Sangre
 from nucleo.ciclo_vida import CicloVida
 from nucleo.config import cargar_config
 from nucleo.datos.repositorio import Repositorio
@@ -52,6 +54,17 @@ async def main() -> None:
     )
 
     async with CicloVida(repositorio, VERSION) as ciclo:
+        sangre = Sangre(Path(config.sangre_ruta))
+        ausencia = sangre.cargar()
+        # Una ausencia larga es tiempo propio perdido. ABEL puede saber
+        # cuánto estuvo caído porque compara contra lo que guardó.
+        if ausencia > 300:
+            sangre.empujar("continuidad", min(1.0, ausencia / 86400))
+            logger.info(
+                "Ausencia previa: %.0f min. Continuidad en %.2f.",
+                ausencia / 60, sangre.leer("continuidad"),
+            )
+
         planificador = Planificador()
 
         planificador.registrar(
@@ -71,6 +84,7 @@ async def main() -> None:
             intervalo_presencia=int(intervalo),
             tls_cert=config.tls_cert,
             tls_clave=config.tls_clave,
+            sangre=sangre,
         )
         planificador.registrar_servicio("servidor_nodos", servidor.ejecutar)
 
@@ -122,6 +136,7 @@ async def main() -> None:
                 despachador=Despachador(registro),
                 criterio=Criterio(),
                 expresador=Expresador(motor),
+                sangre=sangre,
             )
         else:
             logger.warning(
@@ -138,6 +153,7 @@ async def main() -> None:
             host=config.web_host,
             puerto=config.web_puerto,
             conversacion=conversacion,
+            sangre=sangre,
         )
         planificador.registrar_servicio("servidor_web", servidor_web.ejecutar)
 
@@ -145,8 +161,10 @@ async def main() -> None:
         try:
             await planificador.iniciar()
         finally:
+            sangre.guardar()
             await modelo.cerrar()
-        
+
+
 def _instalar_senales(planificador: Planificador, ciclo: CicloVida) -> None:
     """Hace que Ctrl+C solicite una detención ordenada."""
     ya_pedido = False

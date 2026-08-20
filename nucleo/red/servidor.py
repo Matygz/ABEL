@@ -63,6 +63,7 @@ class ServidorNodos:
         intervalo_presencia: int = 60,
         tls_cert: str = "certs/nucleo.crt",
         tls_clave: str = "certs/nucleo.key",
+        sangre=None,
     ) -> None:
         self._repo = repositorio
         self._version = version
@@ -73,6 +74,7 @@ class ServidorNodos:
         self._ips: dict[str, UUID] = {}
         self._solicitudes: dict[UUID, asyncio.Future] = {}
         self._contexto_tls = self._construir_contexto_tls(tls_cert, tls_clave)
+        self._sangre = sangre
     @staticmethod
     def _construir_contexto_tls(cert: str, clave: str) -> ssl.SSLContext:
         """Arma el contexto TLS del servidor.
@@ -309,6 +311,11 @@ class ServidorNodos:
             "[%s] Lote de %s: %d confirmada(s), %d rechazada(s).",
             cid, device_id, len(confirmadas), len(rechazadas),
         )
+
+        # La actividad sube con lo que llega. No es un aviso a nadie: es un
+        # valor que sube, y quien lo lea reaccionará o no.
+        if self._sangre is not None and confirmadas:
+            self._sangre.empujar("actividad", 0.15 * len(confirmadas))
 
     async def _recibir_presencia(self, device_id: UUID, sobre: Sobre, cid: str) -> None:
         """Registra la marca de presencia de un Nodo."""

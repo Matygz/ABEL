@@ -60,6 +60,7 @@ def construir_rutas(
     bus: BusEventos,
     version: str,
     conversacion=None,
+    sangre=None,
 ) -> list:
     """Arma las rutas con sus dependencias ya resueltas.
 
@@ -96,6 +97,12 @@ def construir_rutas(
                 return _json({"error": "sin_sesion"}, status=401)
             return await funcion(request, sesion)
         return envoltorio
+
+    @requiere_sesion
+    async def sangre_actual(request: Request, sesion):
+        if sangre is None:
+            return _json({"error": "sin_sangre"}, status=503)
+        return _json(sangre.instantanea())
 
     def requiere_admin(funcion):
         @wraps(funcion)
@@ -289,6 +296,7 @@ def construir_rutas(
         Route("/api/estado", estado_sistema),
         Route("/api/conversar", conversar, methods=["POST"]),
         Route("/api/historial", historial),
+        Route("/api/sangre", sangre_actual),
         WebSocketRoute("/api/canal", canal),
     ]
     

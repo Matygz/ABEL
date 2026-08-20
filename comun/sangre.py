@@ -74,6 +74,11 @@ class Valor:
     _muestras: deque = field(default_factory=lambda: deque(maxlen=MUESTRAS))
     _ultima_muestra: float = 0.0
 
+    # Si todavía no hay ningún proceso que lo escriba. Se conserva porque
+    # documenta hacia dónde va el sistema, pero se marca para no confundir
+    # un valor en reposo con uno que nadie toca.
+    activo: bool = True
+
     # ------------------------------------------------------------------
 
     def empujar(self, cuanto: float) -> None:
@@ -172,12 +177,14 @@ class Sangre:
             # Nunca llega a cero: siempre hay algo que no se sabe.
             reposo=0.25,
             media_vida=3600.0,
+            activo=False,  # nadie lo empuja todavía
         )
         self.registrar(
             "novedad",
             dueno="atencion",
             descripcion="Qué tanto de lo que llega no encaja con lo esperado.",
             media_vida=900.0,
+            activo=False,  # nadie lo empuja todavía
         )
 
         # --- Sobre sí mismo ---
@@ -188,12 +195,14 @@ class Sangre:
             # Lento: una contradicción no se disuelve con el tiempo, hay que
             # resolverla.
             media_vida=14400.0,
+            activo=False,
         )
         self.registrar(
             "saturacion",
             dueno="memoria",
             descripcion="Memoria acumulada sin consolidar.",
             media_vida=7200.0,
+            activo=False,
         )
         self.registrar(
             "continuidad",
@@ -214,6 +223,7 @@ class Sangre:
             dueno="conversacion",
             descripcion="Preguntas sin responder, cosas a medias.",
             media_vida=43200.0,
+            activo=False,  # nadie lo empuja todavía
         )
 
         # --- Sobre la actividad ---
@@ -233,6 +243,7 @@ class Sangre:
         descripcion: str,
         reposo: float = 0.0,
         media_vida: float = 600.0,
+        activo: bool = True,
     ) -> Valor:
         """Agrega un valor a la sangre.
 
@@ -289,6 +300,7 @@ class Sangre:
                 "reposo": v.reposo,
                 "dueno": v.dueno,
                 "descripcion": v.descripcion,
+                "activo": v.activo,
             }
             for v in self._valores.values()
         }

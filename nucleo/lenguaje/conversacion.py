@@ -50,6 +50,7 @@ class Conversacion:
         criterio: Criterio,
         expresador: Expresador,
         turnos_recordados: int = 8,
+        sangre=None,
     ) -> None:
         self._repo = repositorio
         self._modelo = modelo
@@ -59,6 +60,7 @@ class Conversacion:
         self._criterio = criterio
         self._expresador = expresador
         self._turnos = turnos_recordados
+        self._sangre = sangre
 
     async def responder(
         self,
@@ -123,6 +125,10 @@ class Conversacion:
             ", ".join(i.origen for i in analisis.intenciones),
             decision.postura.value,
         )
+
+        if self._sangre is not None:
+            # Hablar acerca. El decaimiento se encarga de alejar.
+            self._sangre.empujar("conexion", 0.4)
 
         return Turno(
             texto=texto,
