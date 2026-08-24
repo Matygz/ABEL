@@ -263,6 +263,7 @@ class Sangre:
             reposo=reposo,
             media_vida=media_vida,
             nivel=reposo,
+            activo=activo,
         )
         self._valores[nombre] = valor
         return valor

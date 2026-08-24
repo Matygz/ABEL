@@ -315,7 +315,7 @@ class ServidorNodos:
         # La actividad sube con lo que llega. No es un aviso a nadie: es un
         # valor que sube, y quien lo lea reaccionará o no.
         if self._sangre is not None and confirmadas:
-            self._sangre.empujar("actividad", 0.15 * len(confirmadas))
+                self._sangre.empujar("actividad", min(0.3, 0.04 * len(confirmadas)))
 
     async def _recibir_presencia(self, device_id: UUID, sobre: Sobre, cid: str) -> None:
         """Registra la marca de presencia de un Nodo."""
