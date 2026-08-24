@@ -315,7 +315,17 @@ class ServidorNodos:
         # La actividad sube con lo que llega. No es un aviso a nadie: es un
         # valor que sube, y quien lo lea reaccionará o no.
         if self._sangre is not None and confirmadas:
-                self._sangre.empujar("actividad", min(0.3, 0.04 * len(confirmadas)))
+            # Solo lo que implica movimiento real. El sensor muestrea cada
+            # dos segundos y reportar no es lo mismo que estar haciendo algo:
+            # una noche entera con la máquina quieta dejó la actividad en
+            # 0.27 en vez de cero.
+            cambios = sum(
+                1 for obs in observaciones
+                if obs.id in confirmadas
+                and obs.event_type in ("window_session", "session_state")
+            )
+            if cambios:
+                self._sangre.empujar("actividad", min(0.3, 0.04 * cambios))
 
     async def _recibir_presencia(self, device_id: UUID, sobre: Sobre, cid: str) -> None:
         """Registra la marca de presencia de un Nodo."""

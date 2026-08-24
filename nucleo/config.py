@@ -13,6 +13,17 @@ import os
 
 from dotenv import load_dotenv
 
+# --- Temperamento del ciclo interno (docs/filosofia/arquitectura-v1.md) ---
+# Pensar es barato y no molesta a nadie; hablar interrumpe. Un umbral de
+# pensar bajo y uno de hablar alto es lo que hace que el temperamento se
+# sienta con vida interior en vez de ansioso.
+UMBRAL_PENSAR = 0.35
+UMBRAL_HABLAR = 0.75
+
+# Cada cuánto gira el ciclo interno. No depende de que llegue nada: gira
+# porque ABEL existe.
+INTERVALO_CICLO_SEGUNDOS = 5.0
+
 
 class ErrorConfig(Exception):
     """Falta una variable de entorno requerida, o tiene un valor inválido."""

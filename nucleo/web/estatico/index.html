@@ -109,6 +109,50 @@
     color: var(--tenue); font-size: 12px; padding: 1rem 0;
   }
 
+  /* --- Estado (sangre) ---------------------------------------------- */
+
+  .valor-sangre { padding: .6rem 0; border-bottom: 1px solid rgba(74, 85, 96, .12); }
+  .valor-sangre:last-child { border-bottom: none; }
+  .valor-sangre.inactivo { opacity: .4; }
+
+  .valor-sangre .cabecera {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: .4rem;
+  }
+  .valor-sangre .nombre {
+    color: var(--texto); font-size: 12px; letter-spacing: .05em;
+  }
+  .valor-sangre .cifras {
+    display: flex; align-items: baseline; gap: .5rem;
+    color: var(--tenue); font-size: 11px;
+  }
+  .valor-sangre .tendencia { width: 1em; text-align: center; }
+  .valor-sangre .tendencia.sube { color: var(--frio); }
+  .valor-sangre .tendencia.baja { color: var(--calido); }
+
+  .valor-sangre .barra {
+    position: relative; height: 4px; border-radius: 2px;
+    background: rgba(74, 85, 96, .25); overflow: visible;
+  }
+  .valor-sangre .relleno {
+    position: absolute; inset: 0 auto 0 0; height: 100%;
+    width: 0%; border-radius: 2px;
+    background: var(--frio);
+    transition: width .4s ease;
+  }
+  /* La marca de reposo: una línea fina sobre la barra, para ver hacia
+     dónde vuelve el valor cuando nadie lo empuja. */
+  .valor-sangre .reposo {
+    position: absolute; top: -2px; width: 1px; height: 8px;
+    background: var(--tenue);
+  }
+
+  .subtitulo-sangre {
+    color: var(--tenue); font-size: 10px; letter-spacing: .15em;
+    text-transform: uppercase; opacity: .5;
+    margin: 1rem 0 .5rem;
+  }
+
   #invocar-chat {
     position: fixed; bottom: 1.75rem; left: 50%;
     transform: translateX(-50%);
@@ -795,6 +839,48 @@ window.abrirSesion = async function () {
 /* --- Paneles ------------------------------------------------------ */
 
 const vistas = {
+  estado: {
+    nombre: "Estado",
+    ruta: "/api/sangre",
+    dibujar: datos => {
+      // Umbral chico para no marcar el ruido del decaimiento como tendencia:
+      // sin esto, cualquier valor con reposo se muestra siempre "bajando".
+      const UMBRAL_TENDENCIA = 0.01;
+
+      const fila = ([nombre, v]) => {
+        const tendencia =
+          v.tendencia > UMBRAL_TENDENCIA ? "▲" :
+          v.tendencia < -UMBRAL_TENDENCIA ? "▼" : "·";
+        const claseTendencia =
+          v.tendencia > UMBRAL_TENDENCIA ? "sube" :
+          v.tendencia < -UMBRAL_TENDENCIA ? "baja" : "";
+
+        return `
+          <div class="valor-sangre ${v.activo ? "" : "inactivo"}" title="${v.descripcion}">
+            <div class="cabecera">
+              <span class="nombre">${nombre}</span>
+              <span class="cifras">
+                <span class="tendencia ${claseTendencia}">${tendencia}</span>
+                <span>${v.nivel.toFixed(2)}</span>
+              </span>
+            </div>
+            <div class="barra">
+              <div class="relleno" style="width:${v.nivel * 100}%"></div>
+              ${v.reposo > 0 ? `<div class="reposo" style="left:${v.reposo * 100}%"></div>` : ""}
+            </div>
+          </div>`;
+      };
+
+      const entradas = Object.entries(datos);
+      const activos = entradas.filter(([, v]) => v.activo);
+      const inactivos = entradas.filter(([, v]) => !v.activo);
+
+      return activos.map(fila).join("")
+        + (inactivos.length
+            ? `<div class="subtitulo-sangre">sin dueño todavía</div>` + inactivos.map(fila).join("")
+            : "");
+    },
+  },
   actividad: {
     nombre: "Actividad",
     ruta: "/api/actividad",
@@ -858,10 +944,15 @@ const vistas = {
 // no se puede usar.
 const paneles = {
   personal: { titulo: "Personal", vistas: ["actividad", "registro", "presencia"] },
-  admin:    { titulo: "Administración", vistas: ["sistema", "memoria"] },
+  admin:    { titulo: "Administración", vistas: ["estado", "sistema", "memoria"] },
 };
 
 let panelActual = null;
+
+// Id del intervalo de refresco de la sección Estado. Vive en el módulo
+// porque hay que poder cancelarlo desde cerrar() y desde verSeccion(),
+// no solo desde donde se creó.
+let intervaloEstado = null;
 
 window.abrirPanel = function (clave) {
   panelActual = paneles[clave];
@@ -877,6 +968,13 @@ window.abrirPanel = function (clave) {
 };
 
 window.verSeccion = async function (clave, boton) {
+  // Cambiar de sección corta cualquier refresco anterior: si no, al salir
+  // de Estado el intervalo sigue pidiendo al servidor para siempre.
+  if (intervaloEstado !== null) {
+    clearInterval(intervaloEstado);
+    intervaloEstado = null;
+  }
+
   const vista = vistas[clave];
 
   document.querySelectorAll("#secciones button")
@@ -888,9 +986,24 @@ window.verSeccion = async function (clave, boton) {
   $("panel-cuerpo").innerHTML = ok
     ? vista.dibujar(datos)
     : '<div class="vacio-mensaje">No disponible.</div>';
+
+  // Estado es la única sección que muestra condición en vivo: mientras
+  // esté abierta tiene sentido pedir de nuevo cada pocos segundos.
+  if (clave === "estado") {
+    intervaloEstado = setInterval(async () => {
+      const { ok, datos } = await api(vista.ruta);
+      if (ok) $("panel-cuerpo").innerHTML = vista.dibujar(datos);
+    }, 5000);
+  }
 };
 
-window.cerrar = () => $("paneles").classList.remove("visible");
+window.cerrar = () => {
+  $("paneles").classList.remove("visible");
+  if (intervaloEstado !== null) {
+    clearInterval(intervaloEstado);
+    intervaloEstado = null;
+  }
+};
 
 addEventListener("keydown", e => {
   if (e.key !== "Escape") return;

@@ -177,7 +177,11 @@ class Sangre:
             # Nunca llega a cero: siempre hay algo que no se sabe.
             reposo=0.25,
             media_vida=3600.0,
-            activo=False,  # nadie lo empuja todavía
+            # PROVISORIO: el dueño real es el modelo de personas (Fase 3),
+            # que todavía no existe. Hasta entonces lo empuja
+            # nucleo/ciclo.py con los huecos de percepción como aproximación
+            # — ver Ciclo._incertidumbre_provisoria. Se corrige en Fase 3.
+            activo=True,
         )
         self.registrar(
             "novedad",

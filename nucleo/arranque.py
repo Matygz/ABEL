@@ -8,6 +8,7 @@ import signal
 from pathlib import Path
 
 from comun.sangre import Sangre
+from nucleo.ciclo import Ciclo
 from nucleo.ciclo_vida import CicloVida
 from nucleo.config import cargar_config
 from nucleo.datos.repositorio import Repositorio
@@ -76,6 +77,14 @@ async def main() -> None:
                 intervalo_segundos=intervalo,
             )
         )
+        ciclo_interno = Ciclo(
+            sangre=sangre,
+            repositorio=repositorio,
+            actor_id=ciclo.actor_id,
+            run_id=ciclo.run_id,
+        )
+        planificador.registrar_servicio("ciclo", ciclo_interno.girar)
+
         servidor = ServidorNodos(
             repositorio=repositorio,
             version=VERSION,
