@@ -27,7 +27,7 @@ from uuid import UUID
 
 from nucleo.datos.repositorio import Repositorio
 from nucleo.lenguaje.motor import ErrorLenguaje, MotorLenguaje
-from nucleo.memoria.afirmaciones import Afirmaciones
+from nucleo.memoria.afirmaciones import Afirmaciones, VINCULOS_UNICOS
 from nucleo.memoria.preguntas import Preguntas
 
 logger = logging.getLogger(__name__)
@@ -42,18 +42,27 @@ Extraé los hechos del mensaje. Devolvé JSON:
   nadie más, el sujeto es "yo".
 - "predicado" describe la relación en una o dos palabras con guión bajo:
   se_llama, trabaja_en, vive_en, estudia, le_gusta, tiene.
+- Las relaciones de vínculo van de quien tiene el rol hacia quien lo
+  recibe, no de quien habla: en "madre_de", el sujeto es la madre, no
+  necesariamente quien cuenta.
+  "mi vieja se llama Marta" →
+  {"sujeto": "Marta", "predicado": "madre_de", "objeto": "yo"}
+  {"sujeto": "Marta", "predicado": "se_llama", "objeto": "Marta"}
+  "soy hijo de Julio" →
+  {"sujeto": "yo", "predicado": "hijo_de", "objeto": "Julio"}
+  Las dos formas son válidas: el sistema las normaliza a una sola. Lo
+  importante es que el predicado describa correctamente quién es qué del
+  otro, nunca lo contrario de lo que pasa.
 - Si el mensaje habla de otra persona por su vínculo ("mi vieja",
   "mi hermano", "mi jefe"), devolvé DOS hechos: uno con el vínculo (el
-  sujeto sos "yo", el predicado es el vínculo — madre_de, hermano_de,
-  jefe_de — y el objeto es esa persona) y otro con lo que se cuenta de esa
-  persona (el sujeto es esa persona). Si el mensaje da su nombre, usá el
-  nombre como objeto del vínculo y como sujeto del segundo hecho. Si no da
-  el nombre, usá el vínculo tal cual ("mi hermano") en los dos lugares.
-  Ejemplo con nombre — "mi vieja se llama Marta":
-  {"sujeto": "yo", "predicado": "madre_de", "objeto": "Marta"}
-  {"sujeto": "Marta", "predicado": "se_llama", "objeto": "Marta"}
+  sujeto es esa persona, el predicado es el vínculo desde su rol —
+  madre_de, hermano_de, jefe_de — y el objeto es quien habla, "yo") y otro
+  con lo que se cuenta de esa persona (el sujeto sigue siendo ella). Si el
+  mensaje da su nombre, usalo como sujeto de los dos hechos. Si no da el
+  nombre, usá el vínculo tal cual ("mi hermano") como sujeto en los dos
+  lugares.
   Ejemplo sin nombre — "mi hermano vive en Mendoza":
-  {"sujeto": "yo", "predicado": "hermano_de", "objeto": "mi hermano"}
+  {"sujeto": "mi hermano", "predicado": "hermano_de", "objeto": "yo"}
   {"sujeto": "mi hermano", "predicado": "vive_en", "objeto": "Mendoza"}
 - Un posesivo ("su taller", "su hijo") solo tiene sentido si el mensaje
   ya dijo de quién es. Resolvelo contra eso: en "trabajo con mi papá, en
@@ -63,7 +72,7 @@ Extraé los hechos del mensaje. Devolvé JSON:
   ambiguo.
 - Un posesivo se resuelve contra la persona mencionada en el mismo mensaje:
   "trabajo con mi papá, en su taller" →
-  {"sujeto": "yo", "predicado": "padre_de", "objeto": "mi papá"}
+  {"sujeto": "mi papá", "predicado": "padre_de", "objeto": "yo"}
   {"sujeto": "yo", "predicado": "trabaja_en", "objeto": "taller de mi papá"}
     Nunca dejes un posesivo sin resolver: "su taller" a secas no significa
     nada. Si no hay a quién referirlo, omití el hecho.
@@ -74,15 +83,20 @@ Extraé los hechos del mensaje. Devolvé JSON:
 TEMPERATURA = 0.1
 
 # Predicados de vínculo: el objeto de estos hechos no es un dato suelto,
-# es otra persona. El prompt le pide al modelo dos hechos por vínculo (uno
-# con este predicado, sujeto=hablante y objeto=la persona nombrada o el
-# vínculo tal cual si no hay nombre) — acá solo se usa la lista para saber
-# cuándo el objeto hay que resolverlo a un actor en vez de guardarlo como
-# texto suelto.
+# es otra persona — o el propio hablante ("yo"), que es el caso más común
+# ("mi papá" visto desde el rol de "mi papá" tiene como objeto a quien
+# habla). Acá solo se usa la lista para saber cuándo el objeto hay que
+# resolverlo a un actor en vez de guardarlo como texto suelto.
 PREDICADOS_DE_VINCULO = {
     "madre_de", "padre_de", "hermano_de", "hermana_de", "pareja_de",
-    "jefe_de", "jefa_de", "amigo_de", "amiga_de",
+    "jefe_de", "jefa_de", "amigo_de", "amiga_de", "hijo_de",
 }
+
+# Peso de la pregunta que queda abierta cuando dos personas con nombre
+# propio compiten por el mismo vínculo único. Alto: que ABEL no pueda
+# decidir solo cuál de las dos es la correcta es algo que vale la pena que
+# note y, eventualmente, pregunte.
+PESO_PREGUNTA_DUPLICADO = 0.85
 
 
 def _sin_acentos(texto: str) -> str:
@@ -159,14 +173,16 @@ class ExtractorHechos:
             predicado = _normalizar_predicado(hecho["predicado"])
             objeto_texto = hecho["objeto"].strip()
 
-            # En un hecho de vínculo el objeto no es un dato suelto, es
-            # otra persona (o el vínculo mismo si no se dio nombre): se
-            # resuelve a un actor igual que el sujeto, para que la relación
-            # quede enlazada y no como texto libre sin referencia.
+            # En un hecho de vínculo el objeto no es un dato suelto: es
+            # otra persona, o el propio hablante si el objeto es "yo" (el
+            # caso más común: "mi papá" tiene a quien habla como objeto de
+            # padre_de). Se resuelve igual que un sujeto — mismo criterio
+            # para "yo" y para un nombre — para que la relación quede
+            # enlazada y no como texto libre sin referencia.
             object_actor_id = None
             if predicado in PREDICADOS_DE_VINCULO:
-                object_actor_id = await self._resolver_objeto_vinculo(
-                    objeto_texto, predicado, hablante_id, cache
+                object_actor_id = await self._resolver_sujeto(
+                    objeto_texto, hablante_id, cache
                 )
 
             assertion_id = await self._af.afirmar(
@@ -186,6 +202,14 @@ class ExtractorHechos:
             # persona (ver nucleo/memoria/inferencia.py).
             await self._preguntas.responder_por_causa(subject_id, predicado)
 
+            # Un vínculo único (padre_de, madre_de...) con dos objetos
+            # distintos no es una contradicción legítima como sí lo sería
+            # trabaja_en: nadie tiene dos padres biológicos. Es la misma
+            # persona vista dos veces — por ejemplo, "mi papá" provisorio
+            # de un mensaje y "Julio" con nombre de otro.
+            if predicado in VINCULOS_UNICOS:
+                await self._resolver_posible_duplicado(subject_id, predicado)
+
         return registradas
 
     async def _resolver_sujeto(
@@ -198,43 +222,6 @@ class ExtractorHechos:
             return hablante_id
 
         return await self._resolver_persona(sujeto_texto, cache)
-
-    async def _resolver_objeto_vinculo(
-        self, nombre: str, predicado: str, hablante_id: UUID, cache: dict[str, UUID]
-    ) -> UUID:
-        """Resuelve el objeto de un hecho de vínculo, reconciliando identidad.
-
-        "Trabajo con mi papá" crea una persona provisoria nombrada "mi papá"
-        bajo padre_de. Cuando después llega "mi papá se llama Julio", el
-        objeto que llega acá ya es el nombre ("Julio"), no el vínculo —
-        buscarlo por nombre exacto no encuentra a esa persona y crearía una
-        segunda. Reconciliar contra la afirmación de vínculo existente del
-        mismo hablante evita la duplicación (decisión 0028 pendiente).
-
-        No actualiza actors.name acá: eso lo hace únicamente
-        Afirmaciones._sincronizar_nombre, disparado por el hecho "se_llama"
-        que el prompt pide como segundo hecho en este mismo mensaje. Un solo
-        lugar sincroniza el nombre, para que no haya dos caminos que puedan
-        desfasarse.
-        """
-        clave = _normalizar(nombre)
-        if clave in cache:
-            return cache[clave]
-
-        existente = await self._repo.consultar_una(
-            """
-            SELECT object_actor_id FROM assertions
-             WHERE subject_id = %s AND predicate = %s AND retired_at IS NULL
-             ORDER BY confidence DESC LIMIT 1
-            """,
-            (hablante_id, predicado),
-        )
-        if existente is not None and existente["object_actor_id"] is not None:
-            persona_id = existente["object_actor_id"]
-            cache[clave] = persona_id
-            return persona_id
-
-        return await self._resolver_persona(nombre, cache)
 
     async def _resolver_persona(
         self, nombre: str, cache: dict[str, UUID]
@@ -296,3 +283,80 @@ class ExtractorHechos:
             (nombre,),
         )
         return filas[0]["id"]
+
+    async def _resolver_posible_duplicado(self, subject_id: UUID, predicado: str) -> None:
+        """Tras afirmar un vínculo único, ver si quedaron dos personas para el mismo rol.
+
+        Solo mira el predicado recién afirmado: si hubiera otro vínculo
+        único duplicado sin relación con este mensaje, se detecta la
+        próxima vez que se toque (acá o desde scripts/fusionar.py).
+        """
+        duplicados = await self._af.buscar_duplicados_por_vinculo(subject_id)
+        for grupo in duplicados:
+            if grupo["predicate"] != predicado:
+                continue
+
+            por_actor: dict[UUID, dict] = {}
+            for afirmacion in grupo["afirmaciones"]:
+                actor_id = afirmacion["object_actor_id"]
+                if actor_id is not None:
+                    por_actor.setdefault(actor_id, afirmacion)
+
+            ids_actores = list(por_actor.keys())
+            if len(ids_actores) < 2:
+                continue
+
+            # Puede haber más de dos si el vínculo se afirmó tres veces con
+            # objetos distintos; se resuelve el primer par y, si sigue
+            # habiendo duplicado tras la fusión, la próxima pasada lo agarra.
+            a_id, b_id = ids_actores[0], ids_actores[1]
+            origen_id = por_actor[a_id]["id"]
+            await self._fusionar_o_preguntar(subject_id, predicado, a_id, b_id, origen_id)
+
+    async def _fusionar_o_preguntar(
+        self, subject_id: UUID, predicado: str, a_id: UUID, b_id: UUID, origen_id: UUID,
+    ) -> None:
+        """Decide cuál de las dos personas sobrevive, o si no se puede decidir solo.
+
+        Gana la que tiene nombre propio: una etiqueta de vínculo ("mi papa")
+        es provisoria por definición. Si las dos tienen nombre propio y son
+        distintos, no se fusiona a ciegas — puede que se haya extraído mal,
+        o que la persona se haya confundido. Se registra una pregunta.
+        """
+        a_tiene = await self._tiene_nombre_propio(a_id)
+        b_tiene = await self._tiene_nombre_propio(b_id)
+
+        if a_tiene and b_tiene:
+            await self._preguntas.abrir(
+                subject_id,
+                f"dijiste dos personas distintas para '{predicado}': "
+                "no está claro cuál es la correcta",
+                origen_id,
+                PESO_PREGUNTA_DUPLICADO,
+            )
+            return
+
+        if a_tiene:
+            duplicada, real = b_id, a_id
+        elif b_tiene:
+            duplicada, real = a_id, b_id
+        else:
+            # Ninguna tiene nombre propio todavía: no hay base para decidir
+            # cuál sobrevive. Se deja para cuando alguna lo tenga.
+            return
+
+        await self._af.fusionar(
+            duplicada, real, f"duplicado detectado por vínculo único {predicado}"
+        )
+
+    async def _tiene_nombre_propio(self, actor_id: UUID) -> bool:
+        """Si tiene una afirmación se_llama activa, no es solo una etiqueta de vínculo."""
+        fila = await self._repo.consultar_una(
+            """
+            SELECT 1 FROM assertions
+             WHERE subject_id = %s AND predicate = 'se_llama' AND retired_at IS NULL
+             LIMIT 1
+            """,
+            (actor_id,),
+        )
+        return fila is not None

@@ -16,12 +16,14 @@ from psycopg.rows import dict_row
 
 from nucleo.config import cargar_config
 from nucleo.datos.repositorio import Repositorio
+from nucleo.lenguaje.extractor_hechos import ExtractorHechos
 from nucleo.memoria.afirmaciones import (
     Afirmaciones,
     CONFIANZA_INICIAL,
     PISO_RETIRO,
     PRESUPUESTO_POR_PREDICADO,
 )
+from nucleo.memoria.preguntas import Preguntas
 
 
 async def _actor(repo: Repositorio) -> UUID:
@@ -66,20 +68,55 @@ async def _limpiar_nombre(repo: Repositorio, actores: list[UUID]) -> None:
     async with await psycopg.AsyncConnection.connect(
         conninfo, row_factory=dict_row
     ) as conn:
+        # Las preguntas primero: origin_assertion_id referencia assertions.
+        await conn.execute(
+            """
+            DELETE FROM open_questions
+             WHERE subject_id = ANY(%s)
+                OR origin_assertion_id IN (
+                    SELECT id FROM assertions
+                     WHERE subject_id = ANY(%s) OR object_actor_id = ANY(%s)
+                )
+            """,
+            (actores, actores, actores),
+        )
         await conn.execute(
             """
             DELETE FROM assertion_events WHERE assertion_id IN (
-                SELECT id FROM assertions WHERE subject_id = ANY(%s)
+                SELECT id FROM assertions
+                 WHERE subject_id = ANY(%s) OR object_actor_id = ANY(%s)
             )
             """,
-            (actores,),
+            (actores, actores),
         )
-        await conn.execute("DELETE FROM assertions WHERE subject_id = ANY(%s)", (actores,))
+        await conn.execute(
+            "DELETE FROM assertions WHERE subject_id = ANY(%s) OR object_actor_id = ANY(%s)",
+            (actores, actores),
+        )
         await conn.execute("DELETE FROM events WHERE actor_id = ANY(%s)", (actores,))
         await conn.execute("DELETE FROM persons WHERE id = ANY(%s)", (actores,))
         await conn.execute("DELETE FROM users WHERE id = ANY(%s)", (actores,))
         await conn.execute("DELETE FROM actors WHERE id = ANY(%s)", (actores,))
         await conn.commit()
+
+
+async def _persona(repo: Repositorio, nombre: str | None = None) -> UUID:
+    """Una persona con fila en persons, para probar fusión y resolución.
+
+    _actor()/_actor_de_nombre() solo insertan en actors: alcanza para
+    sincronización de nombre, pero fusionar()/resolver() leen persons.
+    """
+    filas = await repo.ejecutar(
+        """
+        WITH nuevo_actor AS (
+            INSERT INTO actors (actor_type, name) VALUES ('person', %s) RETURNING id
+        )
+        INSERT INTO persons (id) SELECT id FROM nuevo_actor
+        RETURNING id
+        """,
+        (nombre or f"test-{uuid7()}",),
+    )
+    return filas[0]["id"]
 
 
 async def _confidence(repo: Repositorio, assertion_id: UUID) -> float:
@@ -307,6 +344,185 @@ async def probar_afirmar_se_llama_sobre_usuario_no_cambia_nombre(repo, af):
         assert await _nombre(repo, usuario) != "Otro Nombre"
     finally:
         await _limpiar_nombre(repo, [usuario, fuente])
+
+
+async def probar_fusionar_reapunta_afirmaciones(repo, af):
+    duplicada, real, fuente = await _persona(repo), await _persona(repo), await _actor(repo)
+    try:
+        aid = await af.afirmar(
+            duplicada, "vive_en", "Quilmes", "vive en quilmes", "told", fuente,
+        )
+        await af.fusionar(duplicada, real, "prueba de fusión")
+
+        fila = await repo.consultar_una(
+            "SELECT subject_id FROM assertions WHERE id = %s", (aid,)
+        )
+        assert fila["subject_id"] == real, (
+            "la afirmación de la duplicada debería haberse reapuntado a la real"
+        )
+    finally:
+        await _limpiar_nombre(repo, [duplicada, real, fuente])
+
+
+async def probar_fusionar_marca_no_borra(repo, af):
+    duplicada, real = await _persona(repo), await _persona(repo)
+    try:
+        await af.fusionar(duplicada, real, "motivo de prueba")
+
+        fila = await repo.consultar_una(
+            "SELECT merged_into, merged_reason FROM persons WHERE id = %s", (duplicada,)
+        )
+        assert fila is not None, "la duplicada no debería borrarse, solo marcarse"
+        assert fila["merged_into"] == real
+        assert fila["merged_reason"] == "motivo de prueba"
+    finally:
+        await _limpiar_nombre(repo, [duplicada, real])
+
+
+async def probar_consultar_duplicada_devuelve_las_de_la_real(repo, af):
+    duplicada, real, fuente = await _persona(repo), await _persona(repo), await _actor(repo)
+    try:
+        await af.afirmar(real, "vive_en", "Bernal", "vive en bernal", "told", fuente)
+        await af.fusionar(duplicada, real, "prueba de consulta")
+
+        propias = await af.sobre(duplicada)
+        assert any(p["object_text"] == "Bernal" for p in propias), (
+            "consultar por la duplicada debería devolver lo que cree de la real"
+        )
+    finally:
+        await _limpiar_nombre(repo, [duplicada, real, fuente])
+
+
+async def probar_fusionar_confirma_equivalentes_no_duplica(repo, af):
+    duplicada, real, fuente = await _persona(repo), await _persona(repo), await _actor(repo)
+    try:
+        await af.afirmar(duplicada, "vive_en", "Mendoza", "vive en mendoza", "told", fuente)
+        await af.afirmar(real, "vive_en", "Mendoza", "vive en mendoza", "told", fuente)
+
+        await af.fusionar(duplicada, real, "prueba de equivalentes")
+
+        filas = await repo.consultar(
+            """
+            SELECT id FROM assertions
+             WHERE subject_id = %s AND predicate = 'vive_en' AND object_text = 'Mendoza'
+               AND retired_at IS NULL
+            """,
+            (real,),
+        )
+        assert len(filas) == 1, (
+            f"debería haber quedado una sola afirmación activa, hubo {len(filas)}"
+        )
+    finally:
+        await _limpiar_nombre(repo, [duplicada, real, fuente])
+
+
+async def probar_dos_padre_de_distintos_se_detectan_como_duplicado(repo, af):
+    hablante = await _actor(repo)
+    papa1 = await _persona(repo, f"mi papa-{uuid7()}")
+    papa2 = await _persona(repo, f"Julio-{uuid7()}")
+    try:
+        await af.afirmar(
+            hablante, "padre_de", "mi papa", "trabajo con mi papa", "told", hablante,
+            object_actor_id=papa1,
+        )
+        await af.afirmar(
+            hablante, "padre_de", "Julio", "mi papa es Julio", "told", hablante,
+            object_actor_id=papa2,
+        )
+
+        duplicados = await af.buscar_duplicados_por_vinculo(hablante)
+        assert any(d["predicate"] == "padre_de" for d in duplicados), (
+            "dos padre_de con objetos distintos deberían detectarse como duplicado"
+        )
+    finally:
+        await _limpiar_nombre(repo, [hablante, papa1, papa2])
+
+
+async def probar_dos_hermano_de_distintos_no_se_detectan(repo, af):
+    hablante = await _actor(repo)
+    hermano1 = await _persona(repo, f"Tomi-{uuid7()}")
+    hermano2 = await _persona(repo, f"Facundo-{uuid7()}")
+    try:
+        await af.afirmar(
+            hablante, "hermano_de", "Tomi", "tengo un hermano tomi", "told", hablante,
+            object_actor_id=hermano1,
+        )
+        await af.afirmar(
+            hablante, "hermano_de", "Facundo", "tengo otro hermano facundo", "told", hablante,
+            object_actor_id=hermano2,
+        )
+
+        duplicados = await af.buscar_duplicados_por_vinculo(hablante)
+        assert not any(d["predicate"] == "hermano_de" for d in duplicados), (
+            "hermano_de admite varios: dos objetos distintos son dos personas, no un duplicado"
+        )
+    finally:
+        await _limpiar_nombre(repo, [hablante, hermano1, hermano2])
+
+
+async def probar_dos_nombres_propios_no_fusiona_abre_pregunta(repo, af):
+    hablante = await _actor(repo)
+    nombre_a, nombre_b = f"Julio-{uuid7()}", f"Mario-{uuid7()}"
+    persona_a = await _persona(repo, nombre_a)
+    persona_b = await _persona(repo, nombre_b)
+    preguntas = Preguntas(repo)
+    extractor = ExtractorHechos(
+        motor=None, afirmaciones=af, preguntas=preguntas, repositorio=repo,
+    )
+    try:
+        await af.afirmar(
+            hablante, "padre_de", nombre_a, "mi papa es Julio", "told", hablante,
+            object_actor_id=persona_a,
+        )
+        await af.afirmar(persona_a, "se_llama", nombre_a, "se llama Julio", "told", hablante)
+        await af.afirmar(
+            hablante, "padre_de", nombre_b, "mi papa es Mario", "told", hablante,
+            object_actor_id=persona_b,
+        )
+        await af.afirmar(persona_b, "se_llama", nombre_b, "se llama Mario", "told", hablante)
+
+        await extractor._resolver_posible_duplicado(hablante, "padre_de")
+
+        marca_a = await repo.consultar_una(
+            "SELECT merged_into FROM persons WHERE id = %s", (persona_a,)
+        )
+        marca_b = await repo.consultar_una(
+            "SELECT merged_into FROM persons WHERE id = %s", (persona_b,)
+        )
+        assert marca_a["merged_into"] is None and marca_b["merged_into"] is None, (
+            "con dos nombres propios distintos no debería fusionar solo"
+        )
+
+        abiertas = await preguntas.abiertas(hablante)
+        assert any("padre_de" in p["question"] for p in abiertas), (
+            "debería haber quedado una pregunta abierta sobre cuál es la correcta"
+        )
+    finally:
+        await _limpiar_nombre(repo, [hablante, persona_a, persona_b])
+
+
+async def probar_resolver_no_entra_en_ciclo_infinito(repo, af):
+    a, b = await _persona(repo), await _persona(repo)
+    try:
+        # Dos personas apuntándose entre sí: una fusión mal hecha a mano, no
+        # algo que fusionar() produzca sola. resolver() tiene que cortar en
+        # vez de colgarse.
+        await repo.ejecutar(
+            "UPDATE persons SET merged_into = %s, merged_at = now(), merged_reason = %s WHERE id = %s",
+            (b, "ciclo de prueba", a),
+        )
+        await repo.ejecutar(
+            "UPDATE persons SET merged_into = %s, merged_at = now(), merged_reason = %s WHERE id = %s",
+            (a, "ciclo de prueba", b),
+        )
+
+        resultado = await asyncio.wait_for(af.resolver(a), timeout=5.0)
+        assert resultado in (a, b), "debería cortar la cadena y devolver algo, no colgarse"
+    finally:
+        # Rompe el ciclo antes de limpiar: si no, cualquier borrado que
+        # dependiera de seguir merged_into también podría colgarse.
+        await repo.ejecutar("UPDATE persons SET merged_into = NULL WHERE id = ANY(%s)", ([a, b],))
+        await _limpiar_nombre(repo, [a, b])
 
 
 async def main() -> None:

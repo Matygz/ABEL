@@ -255,16 +255,20 @@ class Corrector:
         if predicado is None:
             return None
 
+        # La relación es canónica desde quien tiene el rol: en madre_de, el
+        # sujeto es la madre y el hablante es el objeto (ver
+        # nucleo/memoria/relaciones.py). "mi vieja" busca del lado del
+        # objeto, no del sujeto.
         fila = await self._repo.consultar_una(
             """
-            SELECT object_actor_id FROM assertions
-             WHERE subject_id = %s AND predicate = %s AND retired_at IS NULL
+            SELECT subject_id FROM assertions
+             WHERE object_actor_id = %s AND predicate = %s AND retired_at IS NULL
              ORDER BY confidence DESC
              LIMIT 1
             """,
             (hablante_id, predicado),
         )
-        return fila["object_actor_id"] if fila is not None else None
+        return fila["subject_id"] if fila is not None else None
 
     async def _ultima_afirmacion_de_la_sesion(
         self, hablante_id: UUID, session_id: UUID | None,

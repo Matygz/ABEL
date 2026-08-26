@@ -25,36 +25,37 @@ NIVEL = "lectura"
 NECESITA = ("llm", "afirmaciones", "repositorio")
 
 EJEMPLOS = (
-    # Con el dato correcto adentro.
-    "no, se llama Marta",
-    "no, mi vieja se llama Marta",
-    "no, es Julio",
-    "no, ya no trabajo ahí",
-    "no, ya no trabajo ahi",
-    "cambió, ahora vivo en Quilmes",
-    "cambio, ahora vivo en Quilmes",
-    "me confundí, es al revés",
-
-    # Sin el dato: señalan el error sin decir cuál es el valor correcto.
+    # Solo la marca de corrección, sin repetir el hecho: "no, mi vieja se
+    # llama Marta" quedaba a 0.928 de "mi vieja se llama Marta" y se
+    # comía las afirmaciones normales. El "no" pesa poco en el vector de
+    # una frase larga — lo que distingue es la frase corta y explícita.
     "eso está mal",
     "eso esta mal",
     "te equivocaste",
     "no es así",
     "no es asi",
     "nada que ver",
-    "ya no es así",
-    "ya no es asi",
-    "eso ya no vale",
-    "no dije eso",
     "estás equivocado",
     "estas equivocado",
+    "me confundí",
+    "me confundi",
+    "no dije eso",
+    "eso es falso",
+    "eso ya no vale",
+    "ya no es así",
     "corregí eso",
     "corregi eso",
-    "borrá eso",
-    "borra eso",
-    "eso es falso",
+    "está mal lo que anotaste",
+    "no, eso no",
+    "eso cambió",
+    "eso cambio",
     "ya no",
-    "no, para nada",
+    "no, mentira",
+    "mentira",
+    "mentira, no es así",
+    "no mentira",
+    "pará, mentira",
+    "para, mentira",
 )
 
 

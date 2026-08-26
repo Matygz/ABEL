@@ -61,11 +61,37 @@ def _imprimir_por_sujeto(filas: list[dict]) -> None:
         print(f"\n{sujeto}")
         for f in grupo:
             estado = " [retirada]" if f.get("retired_at") else ""
+            derivada = " (derivada)" if f.get("derivada") else ""
             print(
                 f"  {f['predicate']:<20} {f['object_text']:<30} "
                 f"{f['confidence']:.2f}  {f['source_type']:<10} "
-                f"confirmado hace {_hace(f['confirmed_at'])}{estado}"
+                f"confirmado hace {_hace(f['confirmed_at'])}{estado}{derivada}"
             )
+
+
+async def _sobre_sujeto(repo: Repositorio, nombre: str) -> int:
+    """Como el listado general, pero para una sola persona vía sobre().
+
+    todas() no alcanza acá: una relación canónica como Julio/padre_de/Maty
+    está guardada sobre Julio, y consultar "qué sé de Maty" filtrando esa
+    lista no la traería. sobre() la lee también desde el lado de Maty,
+    invertida (ver Afirmaciones.sobre).
+    """
+    actor = await repo.consultar_una(
+        "SELECT id, name FROM actors WHERE lower(name) = %s", (nombre.lower(),)
+    )
+    if actor is None:
+        print(f"No se encontró un actor llamado {nombre!r}.", file=sys.stderr)
+        return 1
+
+    afirmaciones = Afirmaciones(repo)
+    filas = await afirmaciones.sobre(actor["id"])
+    for f in filas:
+        f["sujeto"] = actor["name"]
+        f["retired_at"] = None
+    _imprimir_por_sujeto(filas)
+    _resumen_distribucion(filas)
+    return 0
 
 
 def _imprimir_preguntas(filas: list[dict]) -> None:
@@ -184,6 +210,13 @@ async def _main() -> int:
 
         if args.corregidas:
             return await _corregidas(repo)
+
+        # Con --sujeto y sin --retiradas, sobre() trae también lo que es
+        # derivado de la forma canónica (ver _sobre_sujeto). Con
+        # --retiradas no alcanza: sobre() no devuelve afirmaciones
+        # retiradas, así que ese caso sigue filtrando todas().
+        if args.sujeto and not args.retiradas:
+            return await _sobre_sujeto(repo, args.sujeto)
 
         afirmaciones = Afirmaciones(repo)
         filas = await afirmaciones.todas(incluir_retiradas=args.retiradas)

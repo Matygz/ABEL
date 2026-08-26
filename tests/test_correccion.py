@@ -34,6 +34,21 @@ async def _actor(repo: Repositorio) -> UUID:
     return filas[0]["id"]
 
 
+async def _persona(repo: Repositorio, nombre: str | None = None) -> UUID:
+    """Una persona con fila en persons — af.afirmar()/resolver() la necesitan."""
+    filas = await repo.ejecutar(
+        """
+        WITH nuevo_actor AS (
+            INSERT INTO actors (actor_type, name) VALUES ('person', %s) RETURNING id
+        )
+        INSERT INTO persons (id) SELECT id FROM nuevo_actor
+        RETURNING id
+        """,
+        (nombre or f"test-{uuid7()}",),
+    )
+    return filas[0]["id"]
+
+
 async def _turno(repo: Repositorio, actor_id: UUID, texto: str, session_id: UUID) -> UUID:
     return await repo.registrar_turno(actor_id, "user", texto, session_id=session_id)
 
@@ -57,14 +72,23 @@ async def probar_correccion_con_dato_retira_y_registra_nueva(
     hablante = await _actor(repo)
     creados.append(hablante)
 
-    await extractor.extraer_y_registrar("mi vieja se llama Elena", hablante, None)
-    vinculo = await _assertion(repo, hablante, "madre_de")
-    persona_id = (
-        await repo.consultar_una(
-            "SELECT object_actor_id FROM assertions WHERE id = %s", (vinculo["id"],)
-        )
-    )["object_actor_id"]
-    vieja_nombre = await _assertion(repo, persona_id, "se_llama")
+    # Se arma el vínculo directo, sin pasar por el extractor: que el
+    # modelo use el mismo texto como sujeto en dos hechos del mismo
+    # mensaje ("mi vieja"/"Elena") no siempre es consistente en un modelo
+    # chico (ver test_extraccion.py para esa reconciliación) — acá lo que
+    # se prueba es el corrector, que solo necesita interpretar una
+    # corrección a la vez.
+    afirmaciones = Afirmaciones(repo)
+    persona_id = await _persona(repo, f"vieja-{uuid7()}")
+    creados.append(persona_id)
+    await afirmaciones.afirmar(
+        persona_id, "madre_de", "yo", "mi vieja", "told", hablante,
+        object_actor_id=hablante,
+    )
+    vieja_nombre_id = await afirmaciones.afirmar(
+        persona_id, "se_llama", "Elena", "mi vieja se llama Elena", "told", hablante,
+    )
+    vieja_nombre = {"id": vieja_nombre_id}
 
     await corrector.corregir("no, mi vieja se llama Marta", hablante, None, None)
 

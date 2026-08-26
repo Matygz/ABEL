@@ -51,6 +51,15 @@ from uuid import UUID
 
 from comun.errores import ErrorOperativo
 from nucleo.datos.repositorio import Repositorio
+from nucleo.memoria.relaciones import INVERSAS, SIMETRICAS, equivalentes_de, normalizar
+
+# Dentro de un grupo de equivalentes (ver relaciones.EQUIVALENTES), cuál es
+# el genérico que cede ante uno específico si las dos terminan apuntando al
+# mismo par de personas. Solo padre_de lo es: es el destino de hijo_de
+# cuando no se sabe el género del progenitor (ver relaciones.INVERSAS). Los
+# demás grupos no tienen un miembro genérico — ahí gana la que ya estaba,
+# sin más, como en cualquier otro afirmar repetido.
+GENERICOS = frozenset({"padre_de"})
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +142,21 @@ PREDICADOS_MULTIPLES = {
     "usa_de_madrugada",
 }
 
+# Vínculos que solo pueden apuntar a una persona. Los que no están acá
+# —hermano_de, amigo_de, conoce_a— admiten varios y dos objetos distintos
+# no son un duplicado, son dos personas.
+#
+# Es una lista y no una regla porque el criterio es del mundo, no del
+# sistema: más adelante debería salir del propio catálogo de predicados.
+VINCULOS_UNICOS = frozenset({
+    "padre_de", "madre_de", "esposo_de", "esposa_de",
+})
+
+# Saltos máximos al seguir una cadena de merged_into. No debería hacer
+# falta más de uno o dos, pero una fusión mal hecha podría dejar dos
+# personas apuntándose entre sí — esto corta en vez de colgar el sistema.
+LIMITE_SALTOS_FUSION = 20
+
 
 class Afirmaciones:
     """Lo que ABEL cree: registrarlo, sostenerlo, y dejar que se desvanezca."""
@@ -162,14 +186,94 @@ class Afirmaciones:
         perdería la contradicción, que es información (ver docstring del
         módulo).
         """
-        existente = await self._repo.consultar_una(
-            """
-            SELECT id FROM assertions
-             WHERE subject_id = %s AND predicate = %s AND object_text = %s
-               AND retired_at IS NULL
-            """,
-            (subject_id, predicate, object_text),
-        )
+        subject_id = await self.resolver(subject_id)
+
+        # Cuando el objeto es un actor, dos afirmaciones son la misma si
+        # apuntan al mismo actor aunque el texto difiera: "mi papá" y
+        # "Julio" son la misma persona y el vínculo es uno solo. Sin
+        # esto quedaban dos padre_de activos apuntando al mismo padre.
+        if object_actor_id is not None:
+            object_actor_id = await self.resolver(object_actor_id)
+
+            # Una relación se guarda siempre en la misma dirección, sin
+            # importar cómo se dijo. Si no, "soy hijo de Julio" y
+            # "Julio es mi papá" entran como dos afirmaciones distintas
+            # y ninguna consulta las junta (ver nucleo/memoria/relaciones.py).
+            nuevo_subject_id, predicate, object_actor_id = normalizar(
+                subject_id, predicate, object_actor_id
+            )
+            if nuevo_subject_id != subject_id:
+                # Se invirtieron sujeto y objeto: el texto que se había
+                # dicho ("Julio") describía a quien ahora es sujeto, no
+                # al nuevo objeto. Se recalcula desde el nombre actual en
+                # vez de dejar una etiqueta que ya no describe a nadie.
+                actor_objeto = await self._repo.consultar_una(
+                    "SELECT name FROM actors WHERE id = %s", (object_actor_id,)
+                )
+                if actor_objeto is not None:
+                    object_text = actor_objeto["name"]
+                subject_id = nuevo_subject_id
+
+            equivalentes = equivalentes_de(predicate)
+            if len(equivalentes) > 1:
+                # Puede haber otra fila que diga el mismo vínculo con un
+                # predicado equivalente (padre_de/madre_de, hermano_de/
+                # hermana_de, esposo_de/esposa_de) sobre el mismo par de
+                # personas: es la misma relación contada de otra forma, no
+                # una nueva (ver nucleo/memoria/relaciones.py).
+                conflicto = await self._repo.consultar_una(
+                    """
+                    SELECT id, predicate FROM assertions
+                     WHERE subject_id = %s AND predicate = ANY(%s)
+                       AND object_actor_id = %s AND retired_at IS NULL
+                    """,
+                    (subject_id, list(equivalentes), object_actor_id),
+                )
+                if conflicto is not None and conflicto["predicate"] != predicate:
+                    if predicate in GENERICOS and conflicto["predicate"] not in GENERICOS:
+                        # Lo nuevo es el genérico y ya había algo más
+                        # específico: se confirma lo específico y no se
+                        # toca su predicado.
+                        await self.confirmar(
+                            conflicto["id"], CONFIRMACION_REPETIDA,
+                            "se volvió a afirmar el mismo vínculo, de forma más genérica",
+                        )
+                        return conflicto["id"]
+                    if conflicto["predicate"] in GENERICOS and predicate not in GENERICOS:
+                        # Lo nuevo es más específico que lo que había: gana
+                        # lo nuevo. Se retira el genérico —con su historia,
+                        # como cualquier retiro— y sigue el flujo normal,
+                        # que va a crear la fila específica.
+                        await self.retirar(
+                            conflicto["id"],
+                            f"reemplazada por una forma más específica del mismo vínculo ({predicate})",
+                        )
+                    else:
+                        # Ninguna es más genérica que la otra: gana la que
+                        # ya estaba, igual que un afirmar repetido normal.
+                        await self.confirmar(
+                            conflicto["id"], CONFIRMACION_REPETIDA,
+                            "se volvió a afirmar el mismo vínculo, de otra forma",
+                        )
+                        return conflicto["id"]
+
+            existente = await self._repo.consultar_una(
+                """
+                SELECT id FROM assertions
+                 WHERE subject_id = %s AND predicate = %s
+                   AND object_actor_id = %s AND retired_at IS NULL
+                """,
+                (subject_id, predicate, object_actor_id),
+            )
+        else:
+            existente = await self._repo.consultar_una(
+                """
+                SELECT id FROM assertions
+                 WHERE subject_id = %s AND predicate = %s AND object_text = %s
+                   AND object_actor_id IS NULL AND retired_at IS NULL
+                """,
+                (subject_id, predicate, object_text),
+            )
         if existente is not None:
             await self.confirmar(
                 existente["id"], CONFIRMACION_REPETIDA, "se volvió a afirmar lo mismo"
@@ -358,6 +462,121 @@ class Afirmaciones:
         )
         await self._registrar_cambio(assertion_id, "revived", 0.0, confidence, motivo)
 
+    async def resolver(self, actor_id: UUID) -> UUID:
+        """Sigue merged_into hasta la persona real. Sin persons, no hay nada que seguir.
+
+        Cortada contra ciclos (LIMITE_SALTOS_FUSION): una fusión mal hecha
+        podría dejar dos personas apuntándose entre sí, y sin este límite
+        eso cuelga cualquier consulta en vez de fallar visiblemente.
+        """
+        vistos = {actor_id}
+        actual = actor_id
+        for _ in range(LIMITE_SALTOS_FUSION):
+            fila = await self._repo.consultar_una(
+                "SELECT merged_into FROM persons WHERE id = %s", (actual,)
+            )
+            if fila is None or fila["merged_into"] is None:
+                return actual
+            siguiente = fila["merged_into"]
+            if siguiente in vistos:
+                logger.error(
+                    "Ciclo de fusión detectado siguiendo %s; se corta en %s",
+                    actor_id, actual,
+                )
+                return actual
+            vistos.add(siguiente)
+            actual = siguiente
+
+        logger.error(
+            "Cadena de fusión de %s superó %d saltos; se corta en %s",
+            actor_id, LIMITE_SALTOS_FUSION, actual,
+        )
+        return actual
+
+    async def fusionar(self, duplicada_id: UUID, real_id: UUID, motivo: str) -> None:
+        """Marca a duplicada_id como la misma persona que real_id.
+
+        No se borra nada (regla del módulo, ver docstring de arriba): la
+        duplicada queda con merged_into apuntando a la real, y sus
+        afirmaciones se reapuntan — no se copian, para que la historia de
+        cada una no quede partida entre dos sujetos.
+
+        Idempotente: fusionar una persona ya fusionada no hace nada.
+        """
+        if duplicada_id == real_id:
+            return
+
+        real_id = await self.resolver(real_id)
+        if duplicada_id == real_id:
+            return
+
+        fila = await self._repo.consultar_una(
+            "SELECT merged_into FROM persons WHERE id = %s", (duplicada_id,)
+        )
+        if fila is None or fila["merged_into"] is not None:
+            return
+
+        await self._repo.ejecutar(
+            """
+            UPDATE persons SET merged_into = %s, merged_at = now(), merged_reason = %s
+             WHERE id = %s
+            """,
+            (real_id, motivo, duplicada_id),
+        )
+
+        # Reapuntar, no copiar: tanto lo que la duplicada afirmaba (subject_id)
+        # como lo que otras afirmaciones decían sobre ella (object_actor_id).
+        await self._repo.ejecutar(
+            "UPDATE assertions SET subject_id = %s, updated_at = now() WHERE subject_id = %s",
+            (real_id, duplicada_id),
+        )
+        await self._repo.ejecutar(
+            "UPDATE assertions SET object_actor_id = %s, updated_at = now() "
+            "WHERE object_actor_id = %s",
+            (real_id, duplicada_id),
+        )
+
+        await self._fusionar_equivalentes(real_id)
+        await self._sincronizar_nombre(real_id)
+
+        await self._repo.registrar_evento(
+            event_type="persons_merged",
+            actor_id=real_id,
+            payload={
+                "duplicada_id": str(duplicada_id),
+                "real_id": str(real_id),
+                "motivo": motivo,
+            },
+        )
+
+    async def _fusionar_equivalentes(self, subject_id: UUID) -> None:
+        """Tras reapuntar, dos afirmaciones pueden haber quedado diciendo lo mismo.
+
+        Mismo sujeto, predicado y objeto, ambas activas: en vez de sostener
+        dos filas iguales, se confirma la de mayor confianza (regla 3: sube
+        saturando, no se clava) y la otra se retira — con su historia, como
+        cualquier retiro.
+        """
+        grupos = await self._repo.consultar(
+            """
+            SELECT array_agg(id ORDER BY confidence DESC) AS ids
+              FROM assertions
+             WHERE subject_id = %s AND retired_at IS NULL
+             GROUP BY predicate, object_text
+            HAVING count(*) > 1
+            """,
+            (subject_id,),
+        )
+        for grupo in grupos:
+            ids = grupo["ids"]
+            await self.confirmar(
+                ids[0], CONFIRMACION_REPETIDA, "fusión: ya se sostenía en la persona real"
+            )
+            for otro in ids[1:]:
+                await self.retirar(
+                    otro, "fusión: quedó duplicada con una afirmación equivalente"
+                )
+
     async def presupuesto_reequilibrar(self, subject_id: UUID, predicate: str) -> None:
         # Sostener algo con fuerza implica soltar otra cosa. Sin esto todas las
         # afirmaciones tienden a 1 y el modelo deja de tener forma: no hay
@@ -446,8 +665,25 @@ class Afirmaciones:
     # ------------------------------------------------------------------
 
     async def sobre(self, subject_id: UUID) -> list[dict[str, Any]]:
-        """Todo lo que ABEL cree sobre alguien, por confianza, sin lo retirado."""
-        return await self._repo.consultar(
+        """Todo lo que ABEL cree sobre alguien, por confianza, sin lo retirado.
+
+        Con la canónica `Julio / padre_de / Maty`, la afirmación está
+        guardada sobre Julio. Consultar "qué sé de Maty" solo por
+        subject_id no la traería — y eso sería peor que el problema
+        original (ver nucleo/memoria/relaciones.py). Se guarda una vez y se
+        lee desde los dos lados: duplicar la fila invertida sería más
+        rápido de consultar, pero una fuente permanente de
+        desincronización, porque dos filas que dicen lo mismo pueden
+        divergir con el tiempo.
+
+        Las que vienen de leer desde el otro lado quedan marcadas con
+        "derivada": True, para que quien las use sepa que no son filas
+        propias — importa al editar o corregir (esa operación tiene que
+        apuntar a la fila real, no a la lectura invertida).
+        """
+        subject_id = await self.resolver(subject_id)
+
+        propias = await self._repo.consultar(
             """
             SELECT id, predicate, object_text, object_actor_id, raw_text,
                    confidence, source_type, source_actor_id, source_event_id,
@@ -458,13 +694,52 @@ class Afirmaciones:
             """,
             (subject_id,),
         )
+        for fila in propias:
+            fila["derivada"] = False
+
+        derivadas_crudas = await self._repo.consultar(
+            """
+            SELECT a.id, a.predicate, s.name AS object_text, a.subject_id AS object_actor_id,
+                   a.raw_text, a.confidence, a.source_type, a.source_actor_id,
+                   a.source_event_id, a.created_at, a.updated_at, a.confirmed_at
+              FROM assertions a
+              JOIN actors s ON s.id = a.subject_id
+             WHERE a.object_actor_id = %s AND a.retired_at IS NULL
+             ORDER BY a.confidence DESC
+            """,
+            (subject_id,),
+        )
+
+        derivadas = []
+        for fila in derivadas_crudas:
+            if fila["predicate"] in SIMETRICAS:
+                predicado_derivado = fila["predicate"]
+            else:
+                predicado_derivado = INVERSAS.get(fila["predicate"])
+                if predicado_derivado is None:
+                    # Fuera del catálogo: no se sabe cómo se llama la
+                    # relación desde este lado, así que no se inventa.
+                    continue
+            fila["predicate"] = predicado_derivado
+            fila["derivada"] = True
+            derivadas.append(fila)
+
+        return sorted(propias + derivadas, key=lambda f: f["confidence"], reverse=True)
 
     async def buscar_contradicciones(self, subject_id: UUID) -> list[dict[str, Any]]:
-        """Mismo sujeto y predicado, objeto distinto, ambas por encima del piso.
+        """Mismo sujeto y predicado (o equivalente), objeto distinto, sobre el piso.
 
         No toda discrepancia es contradicción: trabaja_en puede tener varios
         valores legítimos (ver PREDICADOS_MULTIPLES). fecha_nacimiento no.
+
+        Se agrupa por conjunto de equivalentes, no por predicado exacto:
+        padre_de y madre_de con el mismo objeto son el mismo rol dicho de
+        otra forma (ver nucleo/memoria/relaciones.py), no dos hechos que se
+        contradicen. afirmar() ya evita que las dos queden activas a la
+        vez, pero agrupar así igual, en vez de confiar en que nunca haya
+        una excepción — un dato viejo, una fila tocada a mano.
         """
+        subject_id = await self.resolver(subject_id)
         filas = await self._repo.consultar(
             """
             SELECT id, predicate, object_text, confidence
@@ -475,17 +750,54 @@ class Afirmaciones:
             (subject_id,),
         )
 
-        por_predicado: dict[str, list[dict[str, Any]]] = {}
+        por_grupo: dict[frozenset[str], list[dict[str, Any]]] = {}
         for fila in filas:
             if fila["predicate"] in PREDICADOS_MULTIPLES:
                 continue
-            por_predicado.setdefault(fila["predicate"], []).append(fila)
+            clave = equivalentes_de(fila["predicate"])
+            por_grupo.setdefault(clave, []).append(fila)
 
         contradicciones = []
-        for predicado, grupo in por_predicado.items():
+        for grupo_predicados, grupo in por_grupo.items():
             if len({f["object_text"] for f in grupo}) > 1:
-                contradicciones.append({"predicate": predicado, "afirmaciones": grupo})
+                # El nombre que se muestra es el del predicado más
+                # frecuente en el grupo — a efectos de reportar, alcanza
+                # con cualquiera de los equivalentes.
+                contradicciones.append({
+                    "predicate": grupo[0]["predicate"], "afirmaciones": grupo,
+                })
         return contradicciones
+
+    async def buscar_duplicados_por_vinculo(self, subject_id: UUID) -> list[dict[str, Any]]:
+        """Dos o más afirmaciones activas de un vínculo único con objetos distintos.
+
+        Se compara por object_actor_id, no por object_text: dos etiquetas
+        de texto distintas para el mismo actor ("mi papa" y "Julio") no
+        son dos personas, son un nombre sin sincronizar todavía (ver
+        _sincronizar_nombre). Dos actores distintos sí lo son.
+        """
+        subject_id = await self.resolver(subject_id)
+        filas = await self._repo.consultar(
+            """
+            SELECT id, predicate, object_text, object_actor_id, confidence
+              FROM assertions
+             WHERE subject_id = %s AND retired_at IS NULL
+               AND predicate = ANY(%s)
+             ORDER BY predicate, confidence DESC
+            """,
+            (subject_id, list(VINCULOS_UNICOS)),
+        )
+
+        por_predicado: dict[str, list[dict[str, Any]]] = {}
+        for fila in filas:
+            por_predicado.setdefault(fila["predicate"], []).append(fila)
+
+        duplicados = []
+        for predicado, grupo in por_predicado.items():
+            actores = {f["object_actor_id"] for f in grupo if f["object_actor_id"] is not None}
+            if len(actores) > 1:
+                duplicados.append({"predicate": predicado, "afirmaciones": grupo})
+        return duplicados
 
     async def todas(self, incluir_retiradas: bool = False) -> list[dict[str, Any]]:
         """Todas las afirmaciones con el nombre del sujeto. Para scripts.creencias."""

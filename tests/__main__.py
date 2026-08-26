@@ -32,6 +32,7 @@ CON_BASE = [
     "test_observaciones",
     "test_afirmaciones",
     "test_inferencia",
+    "test_relaciones",
 ]
 
 # Necesitan el Núcleo corriendo.

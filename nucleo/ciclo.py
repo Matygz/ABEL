@@ -227,8 +227,19 @@ class Ciclo:
         la confianza de las afirmaciones involucradas: dos cosas muy
         creídas que se contradicen ensucian más que dos dudosas.
         """
+        # Si las afirmaciones se reapuntaron bien al fusionar (ver
+        # Afirmaciones.fusionar), una persona fusionada ya no debería tener
+        # afirmaciones propias — pero se excluye igual, explícito: coherencia
+        # alta sin causa visible es más desconcertante que una consulta de más.
         sujetos = await self._repo.consultar(
-            "SELECT DISTINCT subject_id FROM assertions WHERE retired_at IS NULL"
+            """
+            SELECT DISTINCT a.subject_id FROM assertions a
+             WHERE a.retired_at IS NULL
+               AND NOT EXISTS (
+                   SELECT 1 FROM persons p
+                    WHERE p.id = a.subject_id AND p.merged_into IS NOT NULL
+               )
+            """
         )
         if not sujetos:
             return

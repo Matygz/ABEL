@@ -93,12 +93,17 @@ async def probar_vinculo_sin_nombre_crea_persona_y_relacion(repo, extractor):
     persona_id = donde_vive["subject_id"]
     assert persona_id != hablante, "el hecho es sobre el hermano, no sobre quien habla"
 
+    # hermano_de es simétrica (nucleo/memoria/relaciones.py): la
+    # normalización ordena sujeto y objeto por UUID, así que no se puede
+    # asumir de qué lado queda cada uno — se busca en cualquiera de los dos.
     relacion = await repo.consultar_una(
         """
         SELECT id FROM assertions
-         WHERE subject_id = %s AND predicate = 'hermano_de' AND object_actor_id = %s
+         WHERE predicate = 'hermano_de'
+           AND ((subject_id = %s AND object_actor_id = %s)
+             OR (subject_id = %s AND object_actor_id = %s))
         """,
-        (hablante, persona_id),
+        (hablante, persona_id, persona_id, hablante),
     )
     assert relacion is not None, "debería haberse registrado hermano_de además del hecho"
 
