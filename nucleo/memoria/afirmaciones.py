@@ -198,6 +198,8 @@ class Afirmaciones:
             assertion_id, "created", confianza, confianza, "afirmación nueva"
         )
         await self.presupuesto_reequilibrar(subject_id, predicate)
+        if predicate == "se_llama":
+            await self._sincronizar_nombre(subject_id)
         return assertion_id
 
     async def confirmar(self, assertion_id: UUID, cuanto: float, motivo: str) -> float:
@@ -233,12 +235,15 @@ class Afirmaciones:
             await self._revivir_interno(assertion_id, nueva, "recuperó confianza al confirmarse")
 
         await self.presupuesto_reequilibrar(fila["subject_id"], fila["predicate"])
+        if fila["predicate"] == "se_llama":
+            await self._sincronizar_nombre(fila["subject_id"])
         return nueva
 
     async def contradecir(self, assertion_id: UUID, cuanto: float, motivo: str) -> float:
         """Baja la confianza. Por debajo del piso, retira (regla 1: espejo de confirmar)."""
         fila = await self._repo.consultar_una(
-            "SELECT confidence FROM assertions WHERE id = %s AND retired_at IS NULL",
+            "SELECT subject_id, predicate, confidence FROM assertions "
+            "WHERE id = %s AND retired_at IS NULL",
             (assertion_id,),
         )
         if fila is None:
@@ -260,6 +265,8 @@ class Afirmaciones:
                 assertion_id, f"confianza bajo el piso tras contradicción ({motivo})"
             )
 
+        if fila["predicate"] == "se_llama":
+            await self._sincronizar_nombre(fila["subject_id"])
         return nueva
 
     async def decaer(self) -> int:
@@ -313,7 +320,8 @@ class Afirmaciones:
     async def retirar(self, assertion_id: UUID, motivo: str) -> None:
         """Marca retired_at. No borra: la historia queda (ver docstring del módulo)."""
         fila = await self._repo.consultar_una(
-            "SELECT confidence FROM assertions WHERE id = %s AND retired_at IS NULL",
+            "SELECT subject_id, predicate, confidence FROM assertions "
+            "WHERE id = %s AND retired_at IS NULL",
             (assertion_id,),
         )
         if fila is None:
@@ -324,6 +332,8 @@ class Afirmaciones:
             (assertion_id,),
         )
         await self._registrar_cambio(assertion_id, "retired", 0.0, fila["confidence"], motivo)
+        if fila["predicate"] == "se_llama":
+            await self._sincronizar_nombre(fila["subject_id"])
 
     async def revivir(self, assertion_id: UUID, motivo: str) -> bool:
         """Limpia retired_at si la confianza volvió a subir. Devuelve si revivió."""
@@ -337,6 +347,8 @@ class Afirmaciones:
 
         await self._revivir_interno(assertion_id, fila["confidence"], motivo)
         await self.presupuesto_reequilibrar(fila["subject_id"], fila["predicate"])
+        if fila["predicate"] == "se_llama":
+            await self._sincronizar_nombre(fila["subject_id"])
         return True
 
     async def _revivir_interno(self, assertion_id: UUID, confidence: float, motivo: str) -> None:
@@ -377,6 +389,45 @@ class Afirmaciones:
                 "UPDATE assertions SET confidence = %s, updated_at = now() WHERE id = %s",
                 (nueva, fila["id"]),
             )
+
+    async def _sincronizar_nombre(self, subject_id: UUID) -> None:
+        """El nombre visible de una persona sigue a lo que ABEL cree.
+
+        `actors.name` es la etiqueta operativa y la afirmación `se_llama` es
+        la creencia. Si no se sincronizan, quedan contradiciéndose: se vio a
+        alguien llamado "Elena" con una afirmación activa que decía que se
+        llamaba Marta.
+
+        Se trata como vista materializada: se recalcula acá y en ningún otro
+        lado, para que no haya dos caminos que puedan desfasarse.
+
+        Solo se toca a las personas. Los usuarios y el sistema tienen nombre
+        propio que no depende de lo que ABEL crea.
+        """
+        actor = await self._repo.consultar_una(
+            "SELECT actor_type, name FROM actors WHERE id = %s", (subject_id,)
+        )
+        if actor is None or actor["actor_type"] != "person":
+            return
+
+        activa = await self._repo.consultar_una(
+            """
+            SELECT object_text FROM assertions
+             WHERE subject_id = %s AND predicate = 'se_llama' AND retired_at IS NULL
+             ORDER BY confidence DESC LIMIT 1
+            """,
+            (subject_id,),
+        )
+        # Si no queda ninguna activa (todas retiradas), no se toca el
+        # nombre: es preferible conservar la última etiqueta conocida a
+        # dejar a alguien sin nombre.
+        if activa is None or activa["object_text"] == actor["name"]:
+            return
+
+        await self._repo.ejecutar(
+            "UPDATE actors SET name = %s WHERE id = %s",
+            (activa["object_text"], subject_id),
+        )
 
     async def _registrar_cambio(
         self, assertion_id: UUID, kind: str, delta: float, confidence_after: float, reason: str

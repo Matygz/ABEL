@@ -210,6 +210,12 @@ class ExtractorHechos:
         buscarlo por nombre exacto no encuentra a esa persona y crearía una
         segunda. Reconciliar contra la afirmación de vínculo existente del
         mismo hablante evita la duplicación (decisión 0028 pendiente).
+
+        No actualiza actors.name acá: eso lo hace únicamente
+        Afirmaciones._sincronizar_nombre, disparado por el hecho "se_llama"
+        que el prompt pide como segundo hecho en este mismo mensaje. Un solo
+        lugar sincroniza el nombre, para que no haya dos caminos que puedan
+        desfasarse.
         """
         clave = _normalizar(nombre)
         if clave in cache:
@@ -225,14 +231,6 @@ class ExtractorHechos:
         )
         if existente is not None and existente["object_actor_id"] is not None:
             persona_id = existente["object_actor_id"]
-            actor = await self._repo.consultar_una(
-                "SELECT name FROM actors WHERE id = %s", (persona_id,)
-            )
-            if actor is not None and actor["name"] != nombre:
-                await self._repo.ejecutar(
-                    "UPDATE actors SET name = %s WHERE id = %s",
-                    (nombre, persona_id),
-                )
             cache[clave] = persona_id
             return persona_id
 
