@@ -58,6 +58,12 @@ EJEMPLOS = (
     "jaja",
     "posta?",
     "en serio",
+    "cómo andás",
+    "como andas",
+    "cómo venís",
+    "todo en orden",
+    "qué hacés",
+    "cómo va",
 )
 
 

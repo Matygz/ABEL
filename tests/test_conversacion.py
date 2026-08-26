@@ -18,6 +18,7 @@ from nucleo.lenguaje.indice import IndiceIntenciones
 from nucleo.lenguaje.motor import MotorLenguaje
 from nucleo.lenguaje.servidor_modelo import ServidorModelo
 from nucleo.lenguaje.vectorizador import Vectorizador
+from nucleo.memoria.afirmaciones import Afirmaciones
 from nucleo.memoria.consultas import Memoria
 from nucleo.razonamiento.criterio import Criterio
 from nucleo.razonamiento.despachador import Despachador
@@ -81,6 +82,7 @@ async def armar():
         "memoria": Memoria(repositorio),
         "llm": motor,
         "repositorio": repositorio,
+        "afirmaciones": Afirmaciones(repositorio),
     })
     registro.descubrir()
 

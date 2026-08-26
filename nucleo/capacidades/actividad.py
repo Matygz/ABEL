@@ -37,6 +37,11 @@ EJEMPLOS = (
     "tiempo de uso de WhatsApp",
     "cuánto estuve en el chat",
     "en qué anduve ayer",
+
+    # Variantes sin acento: mismo motivo que en afirmar.py — frases cortas
+    # pierden similitud si falta la tilde.
+    "cuanto tiempo estuve en Code hoy",
+    "que programas use hoy",
 )
 
 

@@ -199,7 +199,7 @@ class Sangre:
             # Lento: una contradicción no se disuelve con el tiempo, hay que
             # resolverla.
             media_vida=14400.0,
-            activo=False,
+            activo=True,
         )
         self.registrar(
             "saturacion",
@@ -224,10 +224,12 @@ class Sangre:
         )
         self.registrar(
             "deuda",
-            dueno="conversacion",
+            dueno="ciclo",
             descripcion="Preguntas sin responder, cosas a medias.",
             media_vida=43200.0,
-            activo=False,  # nadie lo empuja todavía
+            # Fase 1.3: nucleo/ciclo.py la fija desde las preguntas abiertas
+            # en nucleo/memoria/preguntas.py (ver Ciclo._deuda_desde_preguntas).
+            activo=True,
         )
 
         # --- Sobre la actividad ---

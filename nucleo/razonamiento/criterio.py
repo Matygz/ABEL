@@ -151,6 +151,16 @@ class Criterio:
         """Si vale la pena mencionar este resultado."""
         intencion, resultado = resuelto.intencion, resuelto.resultado
 
+        # Contar algo no pide respuesta. Que ABEL conteste "entendido" cada
+        # vez que le contás un dato lo vuelve un formulario. El gesto de la
+        # interfaz alcanza para que se sepa que quedó registrado. Esto
+        # deja el mensaje sin nada que aportar, así que decidir() cae en
+        # ACUSAR — salvo que el mismo mensaje traiga además una consulta o
+        # conversación, que sí se responde (ese Resuelto es otro, y a ese
+        # sí llega este chequeo).
+        if intencion.tipo == "afirmar":
+            return False
+
         if intencion.tipo == "conversar":
             # Una conversación nunca se descarta por confianza: la confianza
             # mide qué tan claro está de qué clase de cosa es, y ante la duda

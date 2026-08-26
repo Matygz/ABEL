@@ -17,9 +17,16 @@ CASOS = [
     ("hola", "conversar"),
     ("me siento como el orto", "conversar"),
     ("estoy re cansado hoy", "conversar"),
+    ("cómo andás", "conversar"),
+    ("cómo venís", "conversar"),
+    ("todo en orden", "conversar"),
+    ("qué hacés", "conversar"),
+    ("cómo va", "conversar"),
     ("probabilidad de sacar 7 con dos dados", "probabilidad"),
     ("qué sabés hacer", "sobre_si_mismo"),
     ("cómo está el sistema", "estado_del_sistema"),
+    ("estado del nucelo", "estado_del_sistema"),
+    ("cuantos eventos tenes?", "estado_del_sistema"),
     ("prendé la luz del living", None),
     ("mandale un mensaje a Tomi", None),
     ("qué tengo en la agenda mañana", None),
@@ -29,7 +36,7 @@ CASOS = [
 
 async def main():
     registro = RegistroCapacidades({
-        "memoria": object(), "llm": object(), "repositorio": object(),
+        "memoria": object(), "llm": object(), "repositorio": object(), "afirmaciones": object(),
     })
     registro.descubrir()
 

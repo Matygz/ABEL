@@ -17,7 +17,12 @@ from comun.planificador import Planificador, Tarea
 from nucleo.tareas.presencia import crear_tarea_presencia
 from nucleo.red.servidor import ServidorNodos
 from comun.eventos import BusEventos
+from nucleo.memoria.afirmaciones import Afirmaciones
 from nucleo.memoria.consultas import Memoria
+from nucleo.memoria.inferencia import Inferencia
+from nucleo.memoria.preguntas import Preguntas
+from nucleo.tareas.inferencia import crear_tarea_inferencia
+from nucleo.lenguaje.extractor_hechos import ExtractorHechos
 from nucleo.web.servidor import ServidorWeb
 from nucleo.web.sesiones import ServicioSesiones
 from nucleo.capacidades.registro import RegistroCapacidades
@@ -38,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 VERSION = "0.0.1"
 INTERVALO_PRESENCIA_POR_DEFECTO = 60.0
+
+# Una vez por día: son consultas pesadas sobre toda la memoria observada y
+# los patrones de uso no cambian en minutos (ver nucleo/tareas/inferencia.py).
+INTERVALO_INFERENCIA_SEGUNDOS = 86400.0
 
 
 async def main() -> None:
@@ -77,13 +86,28 @@ async def main() -> None:
                 intervalo_segundos=intervalo,
             )
         )
+        afirmaciones = Afirmaciones(repositorio)
+        preguntas = Preguntas(repositorio)
+
         ciclo_interno = Ciclo(
             sangre=sangre,
             repositorio=repositorio,
             actor_id=ciclo.actor_id,
             run_id=ciclo.run_id,
+            afirmaciones=afirmaciones,
+            preguntas=preguntas,
         )
         planificador.registrar_servicio("ciclo", ciclo_interno.girar)
+
+        inferencia = Inferencia(repositorio, afirmaciones, preguntas)
+        planificador.registrar(
+            Tarea(
+                nombre="inferencia",
+                funcion=crear_tarea_inferencia(inferencia, sangre),
+                intervalo_segundos=INTERVALO_INFERENCIA_SEGUNDOS,
+                timeout_segundos=300.0,
+            )
+        )
 
         servidor = ServidorNodos(
             repositorio=repositorio,
@@ -115,6 +139,7 @@ async def main() -> None:
                 "memoria": memoria,
                 "llm": motor,
                 "repositorio": repositorio,
+                "afirmaciones": afirmaciones,
             })
             registro.descubrir()
 
@@ -146,6 +171,12 @@ async def main() -> None:
                 criterio=Criterio(),
                 expresador=Expresador(motor),
                 sangre=sangre,
+                extractor_hechos=ExtractorHechos(
+                    motor=motor,
+                    afirmaciones=afirmaciones,
+                    preguntas=preguntas,
+                    repositorio=repositorio,
+                ),
             )
         else:
             logger.warning(

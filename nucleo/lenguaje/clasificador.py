@@ -12,6 +12,7 @@ intérprete generativo ante frases raras.
 from __future__ import annotations
 
 import logging
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -31,6 +32,11 @@ UMBRAL_FRASE_CORTA = 0.85
 
 # Cuántas coincidencias participan de la votación.
 VOTANTES = 5
+
+# Signos de apertura/cierre en español. "¿cómo andás?" medía 0.7998 contra
+# "cómo andás" en 0.9998 — el signo pegado a la palabra basta para que una
+# frase de dos palabras caiga bajo UMBRAL_FRASE_CORTA y quede sin reconocer.
+_PUNTUACION = re.compile(r"[¿¡!?.,;:]+")
 
 
 @dataclass(frozen=True)
@@ -78,6 +84,12 @@ class Clasificador:
     async def clasificar(self, mensaje: str) -> Clasificacion:
         """Devuelve la capacidad que mejor corresponde, o ninguna."""
         mensaje = mensaje.strip()
+        if not mensaje:
+            return Clasificacion(None, None, 0.0)
+
+        # Sin signos de puntuación: son ruido para el embedding y para
+        # contar palabras, no parte del significado.
+        mensaje = _PUNTUACION.sub(" ", mensaje).strip()
         if not mensaje:
             return Clasificacion(None, None, 0.0)
 
@@ -133,7 +145,13 @@ class Clasificador:
         for coincidencia in coincidencias:
             if coincidencia.similitud < self._umbral:
                 continue
-            pesos[coincidencia.capacidad] += coincidencia.similitud
+            # El peso crece con el cuadrado de la similitud: una coincidencia
+            # excelente vale mucho más que dos mediocres. Sin esto gana la
+            # capacidad con más ejemplos parecidos aunque ninguno sea bueno —
+            # `conversar` tiene cuarenta ejemplos y le ganaba a
+            # `sobre_si_mismo` en "qué sabés hacer" tres a dos, con 1.000
+            # contra 0.775.
+            pesos[coincidencia.capacidad] += coincidencia.similitud ** 3
             if coincidencia.capacidad not in mejor_de:
                 mejor_de[coincidencia.capacidad] = coincidencia
 

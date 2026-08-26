@@ -30,6 +30,8 @@ AISLADAS = [
 # Necesitan PostgreSQL.
 CON_BASE = [
     "test_observaciones",
+    "test_afirmaciones",
+    "test_inferencia",
 ]
 
 # Necesitan el Núcleo corriendo.
@@ -44,6 +46,7 @@ CON_MODELO = [
     "test_calculo",
     "test_clasificador",
     "test_conversacion",
+    "test_extraccion",
 ]
 
 

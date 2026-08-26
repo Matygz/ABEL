@@ -30,6 +30,11 @@ EJEMPLOS = (
     "cuándo estuve conectado",
     "a qué hora me levanté",
     "estuve mucho rato inactivo",
+
+    # Variantes sin acento: se escribe "cuando"/"cuanto" mucho más seguido
+    # que con tilde, y la frase corta hace que la falta de tilde importe.
+    "cuando estuve activo",
+    "cuanto tiempo estuve sin tocar nada",
 )
 
 def _rango(crudo: str | None):
