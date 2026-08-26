@@ -15,6 +15,7 @@ from dataclasses import dataclass
 
 from nucleo.lenguaje.analizador import Analizador
 from nucleo.lenguaje.contexto import ProveedorContexto
+from nucleo.lenguaje.corrector import Corrector
 from nucleo.lenguaje.expresador import Expresador
 from nucleo.lenguaje.extractor_hechos import ExtractorHechos
 from nucleo.lenguaje.servidor_modelo import ServidorModelo
@@ -54,6 +55,7 @@ class Conversacion:
         turnos_recordados: int = 8,
         sangre=None,
         extractor_hechos: ExtractorHechos | None = None,
+        corrector: Corrector | None = None,
     ) -> None:
         self._repo = repositorio
         self._modelo = modelo
@@ -65,6 +67,7 @@ class Conversacion:
         self._turnos = turnos_recordados
         self._sangre = sangre
         self._extractor_hechos = extractor_hechos
+        self._corrector = corrector
 
     async def responder(
         self,
@@ -101,6 +104,10 @@ class Conversacion:
         contexto = await self._contexto.obtener(usuario=usuario)
         analisis = await self._analizador.analizar(mensaje, contexto)
 
+        es_correccion = any(
+            i.capacidad == "corregir" for i in analisis.intenciones
+        )
+
         # La extracción no depende de qué capacidad ganó: contar algo es a la
         # vez un hecho y un acto conversacional. Si dependiera del
         # clasificador, un hecho se perdería entero porque la frase no se
@@ -109,10 +116,16 @@ class Conversacion:
         # piso de palabras evita gastar una llamada al modelo en "ok" o
         # "dale"; no hace falta filtrar más: el extractor ya devuelve
         # {"hechos": []} cuando no hay nada que sacar.
+        #
+        # Salvo cuando el mensaje es una corrección: ahí el corrector ya se
+        # encarga de registrar el dato correcto, si lo hay. Si además
+        # corriera el extractor, "no, se llama Marta" quedaría duplicado —
+        # una afirmación por cada camino.
         if (
             self._extractor_hechos is not None
             and user_id is not None
             and len(mensaje.split()) >= 3
+            and not es_correccion
         ):
             # Sin bloquear la respuesta: la extracción ocurre en paralelo y
             # la conversación sigue su curso normal. Si falla, se registra
@@ -122,6 +135,14 @@ class Conversacion:
                 self._extraer_hechos_en_segundo_plano(
                     mensaje, user_id, turno_event_id
                 )
+            )
+
+        # A diferencia de la extracción, una corrección sí se espera antes
+        # de responder: el criterio la deja pasar (ver razonamiento/criterio.py)
+        # y ABEL necesita que ya esté aplicada para poder reconocerla.
+        if self._corrector is not None and user_id is not None and es_correccion:
+            await self._corrector.corregir(
+                mensaje, user_id, turno_event_id, session_id
             )
 
         resultados = await self._despachador.despachar(analisis)

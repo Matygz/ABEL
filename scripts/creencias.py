@@ -6,6 +6,7 @@ Uso:
     python -m scripts.creencias --retiradas         # incluye las descartadas
     python -m scripts.creencias --historia <id>     # por qué cambió una confianza
     python -m scripts.creencias --preguntas         # lo que ABEL sabe que no sabe
+    python -m scripts.creencias --corregidas        # lo que se corrigió, y con qué
 
 Es el control directo del problema de V.0.2: si la distribución de
 confianzas se amontona cerca de 1, algo está mal en cómo suben o bajan.
@@ -87,6 +88,48 @@ async def _preguntas(repo: Repositorio) -> int:
     return 0
 
 
+def _imprimir_corregidas(filas: list[dict]) -> None:
+    if not filas:
+        print("Sin correcciones registradas.")
+        return
+
+    for f in filas:
+        cuando = f["occurred_at"].astimezone().strftime("%d/%m %H:%M")
+        objeto_nuevo = f["objeto_nuevo"] or "(sin dato nuevo)"
+        print(
+            f"  {cuando}  {f['sujeto']:<12} {f['predicate'] or '':<15} "
+            f"{f['objeto_viejo'] or '(sin predicado)':<20} -> {objeto_nuevo:<20} "
+            f"«{f['texto']}»"
+        )
+
+
+async def _corregidas(repo: Repositorio) -> int:
+    # Cruza el evento assertion_corrected (nucleo/lenguaje/corrector.py)
+    # con la afirmación vieja para mostrar sujeto y predicado. La nueva es
+    # opcional: una corrección sin dato ("eso está mal") retira sin
+    # reemplazar.
+    filas = await repo.consultar(
+        """
+        SELECT e.occurred_at,
+               e.payload->>'raw_text' AS texto,
+               s.name AS sujeto,
+               vieja.predicate,
+               vieja.object_text AS objeto_viejo,
+               nueva.object_text AS objeto_nuevo
+          FROM events e
+          JOIN assertions vieja
+            ON vieja.id = (e.payload->>'old_assertion_id')::uuid
+          JOIN actors s ON s.id = vieja.subject_id
+          LEFT JOIN assertions nueva
+            ON nueva.id = (e.payload->>'new_assertion_id')::uuid
+         WHERE e.event_type = 'assertion_corrected'
+         ORDER BY e.occurred_at DESC
+        """
+    )
+    _imprimir_corregidas(filas)
+    return 0
+
+
 async def _historia(repo: Repositorio, assertion_id: UUID) -> int:
     afirmaciones = Afirmaciones(repo)
     eventos = await afirmaciones.historial(assertion_id)
@@ -123,6 +166,10 @@ async def _main() -> int:
         "--preguntas", action="store_true",
         help="Lo que ABEL sabe que no sabe, en vez de lo que cree.",
     )
+    parser.add_argument(
+        "--corregidas", action="store_true",
+        help="Lo que se corrigió: qué creía, qué se corrigió, y con qué texto.",
+    )
     args = parser.parse_args()
 
     configurar_logging("WARNING")
@@ -134,6 +181,9 @@ async def _main() -> int:
 
         if args.preguntas:
             return await _preguntas(repo)
+
+        if args.corregidas:
+            return await _corregidas(repo)
 
         afirmaciones = Afirmaciones(repo)
         filas = await afirmaciones.todas(incluir_retiradas=args.retiradas)

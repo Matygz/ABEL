@@ -78,10 +78,19 @@ async def probar_vinculo_sin_nombre_crea_persona_y_relacion(repo, extractor):
     ids = await extractor.extraer_y_registrar(mensaje, hablante, None)
     assert ids, "debería haber extraído el hecho sobre el hermano"
 
-    fila = await repo.consultar_una(
-        "SELECT subject_id FROM assertions WHERE id = %s", (ids[0],)
+    # El orden de los hechos no está garantizado: el modelo puede devolver
+    # primero el vínculo o primero el atributo. Se busca por contenido.
+    filas = await repo.consultar(
+        "SELECT id, subject_id, predicate FROM assertions WHERE id = ANY(%s)",
+        (ids,),
     )
-    persona_id = fila["subject_id"]
+
+    donde_vive = next(
+        (f for f in filas if f["predicate"] == "vive_en"), None
+    )
+    assert donde_vive is not None, "faltó el hecho sobre dónde vive"
+
+    persona_id = donde_vive["subject_id"]
     assert persona_id != hablante, "el hecho es sobre el hermano, no sobre quien habla"
 
     relacion = await repo.consultar_una(

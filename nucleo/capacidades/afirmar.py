@@ -70,7 +70,7 @@ EJEMPLOS = (
     "no tomo café",
 
     # Relaciones con otras personas.
-    "a Tomi lo conozco del secundario",
+    "a Lucho lo conozco del secundario",
     "Lucho es mi primo",
     "trabajo con Pablo desde hace años",
 

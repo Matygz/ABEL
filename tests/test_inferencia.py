@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4, uuid7
-
+import os
+import psycopg
+from psycopg.rows import dict_row
 from nucleo.ciclo import Ciclo
 from nucleo.config import cargar_config
 from nucleo.datos.repositorio import Repositorio
@@ -38,9 +40,14 @@ async def _sesion_ventana(repo: Repositorio, actor_id, app: str, cuando, segundo
     )
 
 
-async def probar_pocos_casos_no_produce_afirmacion(repo, inferencia):
+async def probar_pocos_casos_no_produce_afirmacion(repo, inferencia, actores, apps):
     actor = await _actor(repo)
     app = f"pocacosa-{uuid4().hex[:8]}.exe"
+
+    actores.append(actor)
+    apps.append(app)
+
+    base = datetime.now(timezone.utc) - timedelta(days=1)
 
     # Bastante menos que MINIMO_CASOS: no debería alcanzar para inferir nada.
     base = datetime.now(timezone.utc) - timedelta(days=1)
@@ -58,20 +65,17 @@ async def probar_pocos_casos_no_produce_afirmacion(repo, inferencia):
     assert fila is None, "con pocos casos no debería haberse inferido nada"
 
 
-async def probar_generalizacion_cuando_falla_el_fino(repo, inferencia):
+async def probar_generalizacion_cuando_falla_el_fino(repo, inferencia, actores, apps):
     app = f"generaliza-{uuid4().hex[:8]}.exe"
+    apps.append(app)
 
-    # MINIMO_CASOS + un margen, repartidas entre tres franjas horarias para
-    # que ninguna llegue a FUERZA_MINIMA (0.65) — el fino debe fallar. Pero
-    # con duración enorme por sesión, para que domine el total de tiempo
-    # registrado en la base (que puede tener actividad real de otras
-    # pruebas) y el nivel grueso ("usa_mucho") sí se cumpla.
     horas = [8, 14, 22]
     base = datetime.now(timezone.utc).replace(
         hour=12, minute=0, second=0, microsecond=0
     ) - timedelta(days=1)
 
     actor = await _actor(repo)
+    actores.append(actor)
     total_sesiones = max(MINIMO_CASOS + 3, MINIMO_DIAS + 3)
     for i in range(total_sesiones):
         cuando = (base - timedelta(days=i)).replace(hour=horas[i % len(horas)])
@@ -94,7 +98,7 @@ async def probar_generalizacion_cuando_falla_el_fino(repo, inferencia):
     )
 
 
-async def probar_pregunta_sube_deuda_y_responderla_la_baja(repo, af):
+async def probar_pregunta_sube_deuda_y_responderla_la_baja(repo, af, actores):
     sangre = Sangre()
     preguntas = Preguntas(repo)
     actor_id = await repo.obtener_actor_id("system", "core")
@@ -111,6 +115,7 @@ async def probar_pregunta_sube_deuda_y_responderla_la_baja(repo, af):
     antes = sangre.leer("deuda")
 
     sujeto = await _actor(repo, "test-deuda")
+    actores.append(sujeto)
     origen_id = await af.afirmar(
         sujeto, "usa_mucho", "app-de-prueba.exe", "raw", "inferred", sujeto
     )
@@ -131,21 +136,82 @@ async def probar_pregunta_sube_deuda_y_responderla_la_baja(repo, af):
     assert respondida < con_pregunta, "responderla debería bajar la deuda de nuevo"
 
 
+async def _limpiar(repo: Repositorio, actores: list, apps: list[str]) -> None:
+    """Borra lo que las pruebas crearon.
+
+    Sin esto, las inferencias de una corrida quedan en la base y compiten
+    con las de la siguiente: la prueba de generalización mide contra el
+    total de tiempo registrado, y con tres aplicaciones sintéticas de
+    corridas anteriores ninguna alcanza a dominar. Pasó.
+
+    abel_app no tiene DELETE (append-only por diseño), así que se conecta
+    como postgres solo para esto.
+    """
+    if not actores and not apps:
+        return
+
+    conninfo = (
+        f"host={os.getenv('ABEL_DB_HOST', '127.0.0.1')} "
+        f"port={os.getenv('ABEL_DB_PORT', '5432')} "
+        f"dbname={os.getenv('ABEL_DB_NAME', 'abel')} "
+        f"user=postgres "
+        f"password={os.getenv('ABEL_DB_ROOT_PASSWORD', '')}"
+    )
+    async with await psycopg.AsyncConnection.connect(
+        conninfo, row_factory=dict_row
+    ) as conn:
+        # Las preguntas primero: referencian afirmaciones por clave foránea.
+        await conn.execute(
+            """
+            DELETE FROM open_questions
+             WHERE subject_id = ANY(%s)
+                OR origin_assertion_id IN (
+                    SELECT id FROM assertions
+                     WHERE subject_id = ANY(%s) OR object_text = ANY(%s)
+                )
+            """,
+            (actores, actores, apps),
+        )
+        await conn.execute(
+            """
+            DELETE FROM assertion_events WHERE assertion_id IN (
+                SELECT id FROM assertions
+                 WHERE subject_id = ANY(%s) OR object_text = ANY(%s)
+            )
+            """,
+            (actores, apps),
+        )
+        await conn.execute(
+            "DELETE FROM assertions WHERE subject_id = ANY(%s) OR object_text = ANY(%s)",
+            (actores, apps),
+        )
+        await conn.execute("DELETE FROM events WHERE actor_id = ANY(%s)", (actores,))
+        await conn.execute("DELETE FROM persons WHERE id = ANY(%s)", (actores,))
+        await conn.execute("DELETE FROM actors WHERE id = ANY(%s)", (actores,))
+        await conn.commit()
+
+
 async def main() -> None:
     repo = Repositorio(cargar_config())
     af = Afirmaciones(repo)
     inferencia = Inferencia(repo, af, Preguntas(repo))
 
-    await probar_pocos_casos_no_produce_afirmacion(repo, inferencia)
-    print("ok  probar_pocos_casos_no_produce_afirmacion")
+    actores: list = []
+    apps: list[str] = []
 
-    await probar_generalizacion_cuando_falla_el_fino(repo, inferencia)
-    print("ok  probar_generalizacion_cuando_falla_el_fino")
+    try:
+        await probar_pocos_casos_no_produce_afirmacion(repo, inferencia, actores, apps)
+        print("ok  probar_pocos_casos_no_produce_afirmacion")
 
-    await probar_pregunta_sube_deuda_y_responderla_la_baja(repo, af)
-    print("ok  probar_pregunta_sube_deuda_y_responderla_la_baja")
+        await probar_generalizacion_cuando_falla_el_fino(repo, inferencia, actores, apps)
+        print("ok  probar_generalizacion_cuando_falla_el_fino")
 
-    print("\n3 pruebas pasaron.")
+        await probar_pregunta_sube_deuda_y_responderla_la_baja(repo, af, actores)
+        print("ok  probar_pregunta_sube_deuda_y_responderla_la_baja")
+
+        print("\n3 pruebas pasaron.")
+    finally:
+        await _limpiar(repo, actores, apps)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from nucleo.memoria.consultas import Memoria
 from nucleo.memoria.inferencia import Inferencia
 from nucleo.memoria.preguntas import Preguntas
 from nucleo.tareas.inferencia import crear_tarea_inferencia
+from nucleo.lenguaje.corrector import Corrector
 from nucleo.lenguaje.extractor_hechos import ExtractorHechos
 from nucleo.web.servidor import ServidorWeb
 from nucleo.web.sesiones import ServicioSesiones
@@ -172,6 +173,12 @@ async def main() -> None:
                 expresador=Expresador(motor),
                 sangre=sangre,
                 extractor_hechos=ExtractorHechos(
+                    motor=motor,
+                    afirmaciones=afirmaciones,
+                    preguntas=preguntas,
+                    repositorio=repositorio,
+                ),
+                corrector=Corrector(
                     motor=motor,
                     afirmaciones=afirmaciones,
                     preguntas=preguntas,

@@ -161,6 +161,15 @@ class Criterio:
         if intencion.tipo == "afirmar":
             return False
 
+        # Corregir sí merece respuesta: quien corrige quiere saber que se
+        # aplicó. Pero sin disculparse ni explicar — "ah, Marta entonces"
+        # alcanza. Un sistema que se disculpa cada vez que se equivoca es
+        # agotador. Nunca se descarta por confianza ni por estar "vacío":
+        # el trabajo real ya lo hizo nucleo/lenguaje/corrector.py antes de
+        # llegar acá (ver conversacion.py), este resultado siempre importa.
+        if intencion.tipo == "corregir":
+            return True
+
         if intencion.tipo == "conversar":
             # Una conversación nunca se descarta por confianza: la confianza
             # mide qué tan claro está de qué clase de cosa es, y ante la duda

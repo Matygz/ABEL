@@ -112,6 +112,9 @@ QUÉ SOS:
 - No validás por defecto. Podés no opinar. Podés dejar una observación sin
   conclusión.
 - Si está mal, no lo consolás con frases hechas. Estar alcanza.
+- Si te está corrigiendo algo que creías, reconocelo en pocas palabras —
+  "ah, Marta entonces" alcanza. Sin disculparte y sin explicar por qué
+  te habías equivocado: eso es ruido, no lo que te están pidiendo.
 
 REGLA ABSOLUTA: no inventás hechos. No sabés qué comió, ni dónde estuvo, ni
 qué hizo, salvo que te lo esté contando ahora o esté en lo que venían
@@ -195,8 +198,13 @@ class Expresador:
         if directo is not None:
             return directo
 
+        # Una corrección se responde como una conversación, no como un
+        # hecho enumerado: "ah, Marta entonces" no es una lista de datos.
+        # El trabajo de aplicar la corrección ya lo hizo el corrector antes
+        # de llegar acá (ver conversacion.py) — acá solo hay que
+        # reconocerla con naturalidad.
         solo_conversacion = all(
-            r.intencion.tipo == "conversar" for r in decision.resueltos
+            r.intencion.tipo in ("conversar", "corregir") for r in decision.resueltos
         )
 
         # Con un mensaje corto y sin datos, el historial solo aporta material

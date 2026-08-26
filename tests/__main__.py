@@ -47,6 +47,7 @@ CON_MODELO = [
     "test_clasificador",
     "test_conversacion",
     "test_extraccion",
+    "test_correccion",
 ]
 
 
