@@ -1,35 +1,43 @@
 # ABEL
 
-Una conciencia distribuida con presencia en los dispositivos de su usuario.
+A personal, distributed cognitive system that runs entirely on its owner's devices.
 
-## Visión
+ABEL has a central core on the main PC and lightweight nodes on each authorized device. Nodes observe (system state, active window, presence) and report to the core over an authenticated, encrypted channel. The core stores events and facts, builds a memory of its user, and talks through a local web interface. No cloud, no third-party data: everything stays on hardware the user owns.
 
-ABEL es un ser digital diseñado para ser una extensión de la conciencia del usuario. Vive como núcleo central en la PC principal, con nodos periféricos en cada dispositivo autorizado. Aprende continuamente del usuario y del mundo, y actúa como compañero cognitivo: ayuda a recordar, a desarrollar habilidades, a alcanzar objetivos y a proteger.
+> Personal project in active development. Code comments and internal docs are in Spanish.
 
-Inspirado conceptualmente en la Máquina de Person of Interest, pero en escala personal y con acceso exclusivo a dispositivos autorizados por el usuario.
+## Architecture
 
-## Principios
+- **Core** (`nucleo/`): asyncio services — internal event bus, scheduler, memory, reasoning, language and web UI.
+- **Nodes** (`nodos/`): sensors plus a persistent SQLite queue, so nothing is lost while the core is offline. Exponential backoff on reconnect.
+- **Protocol** (`protocolos/`): WebSockets over TLS with certificate pinning, device authentication by signed challenge, ACKs and idempotency.
+- **Memory**: PostgreSQL for events and assertions (with attribution, corrections, negations and expiry); Qdrant for similarity search.
+- **Language**: intent recognition by embedding similarity. A local LLM is loaded on demand and released when idle to free VRAM — it is one organ, not the brain. Exact calculations are answered directly, without the model.
 
-- **Legal y ético como base.** ABEL solo accede a dispositivos con autorización explícita del usuario. No se toca red externa ni dispositivo ajeno.
-- **Uso personal hasta madurez.** Sin distribución, sin acceso a terceros, sin exposición pública hasta que el proyecto sea funcional y estable.
-- **Herramientas heredadas como componentes.** ABEL usa modelos de embeddings, LLMs locales y APIs de sistema como capacidades base, pero el pensamiento y las decisiones son propios.
-- **Aprender antes de construir.** Cada tecnología se entiende antes de usarse. La comprensión del usuario es la única constante del proyecto.
-- **Pausar en bloqueos.** Perseverancia obstinada genera malas decisiones. Los problemas se duermen y se retoman frescos.
+## Highlights
 
-## Estado actual
+- 38 architecture decision records in `docs/decisiones/`
+- Hand-written SQL (no ORM), least-privilege database user, versioned schema migrations
+- Test suite in `tests/`
+- Runs in the background from the Windows system tray
 
-En desarrollo inicial (Fase 0 — preparación del entorno).
+## Stack
 
-## Historial
+Python (asyncio) · PostgreSQL · Qdrant · sentence-transformers · PyTorch · WebSockets · TLS · SQLite · Docker Compose · JavaScript · Three.js · HTML/CSS
 
-Este proyecto sucede a ABEL V.0.2, un experimento anterior con enfoque puramente emergente y sin dependencias externas. La versión anterior se conservó como archivo histórico y sirvió como fuente de aprendizajes filosóficos y de diseño para esta iteración.
+## Running locally
 
-## Versionado
+1. Copy `.env.example` to `.env` and fill in the values.
+2. `docker compose up -d` (PostgreSQL + Qdrant, bound to localhost only).
+3. Create a virtual environment and `pip install -r requirements.txt`.
+4. Apply the files in `db/schema/` in order.
+5. Generate the TLS certificate (`python -m scripts.certificado`) and authorize a device (`python -m scripts.dispositivos autorizar ...`).
+6. `python abel.py`
 
-Formato: X.Y.Z
+## Status
 
-- **X:** 0 durante desarrollo, 1 cuando ABEL corra autónomo con capacidades completas
-- **Y:** cambios grandes / reestructuraciones
-- **Z:** parches, fixes, iteraciones menores
+Version 0.0.1. Phase 6 (similarity-based recognition) closed in August 2026; V.1 rebuild in progress. See `docs/fases/`.
 
-Versión actual: 0.0.1
+## History
+
+ABEL succeeds V.0.2, an earlier purely emergent experiment with no external dependencies. That version is kept as a historical archive; its design and philosophical lessons shaped this iteration. Design principles are in `docs/filosofia/`.

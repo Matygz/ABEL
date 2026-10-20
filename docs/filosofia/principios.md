@@ -10,7 +10,7 @@ ABEL solo accede a dispositivos con autorización explícita del usuario. No acc
 
 ### 2. Uso personal hasta madurez
 
-ABEL no se distribuye, no se expone públicamente, no se comercializa hasta que el usuario decida que está listo para hacerlo. Esto protege el proyecto durante su desarrollo y evita compromisos prematuros.
+El código de ABEL es público como portafolio y registro del proceso. Lo que no se hace hasta que el usuario decida que está listo: distribuirlo como producto, darle acceso a terceros o comercializarlo. Esto protege el proyecto durante su desarrollo y evita compromisos prematuros.
 
 ### 3. Herramientas heredadas como componentes
 

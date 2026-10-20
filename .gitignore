@@ -65,3 +65,7 @@ claves/
 *.key
 certs/
 datos/
+
+# Archivos sueltos de prueba
+freeze
+prueba.json
